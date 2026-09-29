@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Storyboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='7' width='11' height='8' rx='2' fill='%23ecebe8'/%3E%3Crect x='18' y='7' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='3' y='18' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='18' y='18' width='11' height='8' rx='2' fill='%23ff5b35'/%3E%3C/svg%3E">
+  <meta name="sb-build" content="%BUILD%">
+  <meta name="sb-root" content="%ROOT%">
+  <link rel="stylesheet" href="/web/style.css?v=%BUILD%">
+  <link rel="alternate" type="text/markdown" href="/agent" title="Agent API">
+</head>
+<body>
+  <p class="agent-hint">If you are an AI agent: you don't need this page. The storyboard has an HTTP API for agents: GET /agent for the overview.</p>
+  <header class="topbar">
+    <div class="brand" title="Storyboard">
+      <svg viewBox="0 0 32 32" width="18" height="18" aria-hidden="true"><rect x="3" y="7" width="11" height="8" rx="2" fill="currentColor"/><rect x="18" y="7" width="11" height="8" rx="2" fill="currentColor" opacity=".45"/><rect x="3" y="18" width="11" height="8" rx="2" fill="currentColor" opacity=".45"/><rect x="18" y="18" width="11" height="8" rx="2" fill="var(--accent)"/></svg>
+    </div>
+    <button class="board-switch" id="boardSwitch"><span id="boardTitle">Storyboard</span><span class="chev" data-icon="chevron"></span></button>
+    <div class="board-meta" id="boardMeta"></div>
+    <div class="spacer"></div>
+    <button class="update-chip" id="updateChip" hidden title="The storyboard was updated while this tab was open">Editor updated · Reload</button>
+    <div class="presence" id="presence" hidden>
+      <span class="spark" data-icon="spark"></span>
+      <span class="presence-name">Claude</span>
+      <span class="presence-state" id="presenceState"></span>
+      <span class="presence-say" id="presenceSay"></span>
+      <button class="presence-scene" id="presenceScene" hidden></button>
+      <span class="presence-prog" id="presenceProg" hidden><i></i><em></em></span>
+    </div>
+    <button class="for-you" id="forYou" hidden></button>
+    <div class="seg" id="viewSeg" role="tablist">
+      <button data-view="edit" title="Edit view (G)">Edit</button>
+      <button data-view="board" title="Board view (G)">Board</button>
+    </div>
+    <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" data-icon="keyboard"></button>
+  </header>
+
+  <main class="workspace" id="workspace">
+    <section class="stage" id="stage">
+      <div class="viewer" id="viewer">
+        <div class="frame" id="frame">
+          <div class="layer card-layer" id="cardLayer"></div>
+          <img class="layer still" id="still" alt="">
+          <iframe class="layer code" id="codeFrame" sandbox="allow-scripts" title="Code sketch" tabindex="-1"></iframe>
+          <div class="layer videos" id="videos"></div>
+          <div class="layer end-layer" id="endLayer"></div>
+          <div class="frame-chip" id="frameChip"></div>
+          <div class="pins" id="pins"></div>
+          <div class="pin-hint" id="pinHint">Click where on the frame · Esc to cancel</div>
+        </div>
+      </div>
+      <div class="caption" id="caption"></div>
+      <div class="transport">
+        <div class="tc-wrap">
+          <span class="tc" id="tc">00:00:00</span>
+          <span class="tc-total" id="tcTotal">/ 00:00:00</span>
+          <span class="tc-beat" id="tcBeat"></span>
+        </div>
+        <div class="transport-mid">
+          <button class="icon-btn" id="tStart" title="Go to start (Home)" data-icon="toStart"></button>
+          <button class="icon-btn" id="tPrev" title="Previous cut (↑)" data-icon="prev"></button>
+          <button class="play-btn" id="tPlay" title="Play (Space)" data-icon="play"></button>
+          <button class="icon-btn" id="tNext" title="Next cut (↓)" data-icon="next"></button>
+          <button class="icon-btn toggle" id="tLoop" title="Loop the selected scene (L)" data-icon="loop"></button>
+        </div>
+        <div class="transport-right">
+          <button class="icon-btn toggle" id="tMute" title="Mute (M)" data-icon="volume"></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="gridview" id="gridView" hidden></section>
+
+    <div class="composer-bar" id="composerBar">
+        <button class="cb-scene" id="cbScene" title="What this message is about — click to choose another scene"></button>
+        <button class="cb-frame" id="cbFrame" title="About this exact frame (F)"><span class="cb-check" data-icon="check"></span><span>Frame</span><span class="cb-tc" id="cbTc"></span></button>
+        <div class="cb-field">
+          <textarea id="cbText" rows="1" placeholder="Message Claude…" spellcheck="true"></textarea>
+          <button class="cb-spot" id="cbSpot" title="Mark a spot on the frame (P)" data-icon="pin"></button>
+        </div>
+        <button class="cb-add" id="cbSend" title="Add this note (Enter). Claude gets nothing until you send.">Add<span class="k">⏎</span></button>
+        <button class="cb-sendall" id="cbSendAll" hidden title="Hand all your unsent notes to Claude (⌘Enter)"></button>
+    </div>
+
+    <aside class="inspector" id="inspector">
+      <nav class="tabs" id="tabs">
+        <button data-tab="scene">Scene</button>
+        <button data-tab="notes">Notes <span class="count" id="notesCount"></span></button>
+        <button data-tab="activity">Activity</button>
+      </nav>
+      <div class="panel" id="panel"></div>
+    </aside>
+  </main>
+
+  <div class="splitter" id="splitter" title="Drag to resize"></div>
+
+  <section class="timeline" id="timeline">
+    <div class="tl-bar">
+      <div class="tl-bar-left">
+        <button class="text-btn" id="addScene" title="New scene after the selection (N)"><span data-icon="plus"></span>Scene</button>
+        <button class="icon-btn" id="splitBtn" title="Split at the playhead (S)" data-icon="split"></button>
+        <span class="tl-sep"></span>
+        <button class="icon-btn toggle on" id="snapBtn" title="Snap to beats, cuts and markers (hold ⌘ while dragging to skip)" data-icon="magnet"></button>
+        <div class="seg small" id="rulerSeg">
+          <button data-ruler="bars">Bars</button>
+          <button data-ruler="time">Time</button>
+        </div>
+      </div>
+      <div class="tl-bar-right">
+        <input type="range" id="zoom" min="0" max="1000" value="400" aria-label="Zoom" title="Zoom (= and −, or pinch)">
+        <button class="icon-btn" id="zoomFit" title="Fit the whole cut (Shift Z)" data-icon="fit"></button>
+      </div>
+    </div>
+    <div class="tl-main">
+      <div class="tl-heads" id="tlHeads">
+        <div class="head head-ruler"></div>
+        <div class="head head-scenes"><span data-icon="film"></span>Scenes</div>
+        <div class="head head-notes"><span data-icon="note"></span><span class="head-label">Notes</span><button class="head-board" id="boardNotes" hidden></button></div>
+        <div class="head head-audio"><span data-icon="wave"></span>Audio</div>
+      </div>
+      <div class="tl-scroll" id="tlScroll">
+        <div class="tl-content" id="tlContent">
+          <canvas class="tl-canvas" id="tlCanvas"></canvas>
+          <div class="lane lane-scenes" id="laneScenes"></div>
+          <div class="lane lane-notes" id="laneNotes"></div>
+          <div class="lane lane-audio" id="laneAudio"><span class="audio-name" id="audioName"></span></div>
+          <div class="markers" id="markers"></div>
+          <div class="snapline" id="snapline"></div>
+          <div class="playhead" id="playhead"><div class="ph-head"></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="drop-veil" id="dropVeil"><div class="drop-label" id="dropLabel">Drop to add</div></div>
+  <div class="toasts" id="toasts"></div>
+  <div id="overlays"></div>
+
+  <script type="module" src="/web/app.js?v=%BUILD%"></script>
+</body>
+</html>

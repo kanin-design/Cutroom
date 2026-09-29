@@ -1,0 +1,8 @@
+{
+  "name": "storyboard",
+  "private": true,
+  "type": "module",
+  "description": "A storyboard you and an agent edit together",
+  "bin": { "sb": "./sb" },
+  "scripts": { "start": "node server.js" }
+}
