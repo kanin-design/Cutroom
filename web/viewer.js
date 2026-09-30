@@ -234,8 +234,9 @@ function preloadNext(i) {
 }
 
 // ---------------------------------------------------------------- notes on the frame
-// Spots marked on the frame show as pins while their scene is on screen (faint away from their
-// moment). The spot being written about shows as a dashed pin.
+// A spot marked on a frame shows as a pin on that frame only, while paused: step or play past it and
+// it's gone. The timeline marker and the Notes list both bring you back to it. The spot being
+// written about shows as a dashed pin.
 
 let pinsKey = '';
 
@@ -248,16 +249,18 @@ function openNote(n) {
 function renderPins() {
   if (!S.board) return;
   const hit = here();
-  const sid = hit?.scene.id;
+  if (!hit) { pinsKey = ''; return pinsEl.replaceChildren(); } // a board with no scenes yet
+  const sid = hit.scene.id;
   const b = S.board;
-  const near = n => n.at == null || Math.abs(hit.local - n.at) < 0.75;
-  const pinned = b.notes.filter(n => n.pin && n.scene === sid && (!n.resolved || S.sel.note === n.id));
-  const key = `${sid}|${pinned.map(n => n.id + (near(n) ? '' : 'f')).join(',')}|${S.sel.note}|${b.rev}|${S.draftPin ? S.draftPin.x + ',' + S.draftPin.y : ''}|${S.playing}`;
+  const frame = Math.round(hit.local * b.fps);
+  const onFrame = n => n.at != null && Math.round(n.at * b.fps) === frame;
+  const pinned = S.playing ? [] : b.notes.filter(n => n.pin && n.scene === sid && onFrame(n) && (!n.resolved || S.sel.note === n.id));
+  const key = `${sid}|${pinned.map(n => n.id).join(',')}|${S.sel.note}|${b.rev}|${S.draftPin ? S.draftPin.x + ',' + S.draftPin.y : ''}|${S.playing}`;
   if (key === pinsKey) return;
   pinsKey = key;
   const num = n => String(b.notes.indexOf(n) + 1);
   const pins = pinned.map(n => h('div.pin', {
-    class: `${near(n) ? '' : 'far'} ${n.resolved ? 'resolved' : ''} ${S.sel.note === n.id ? 'sel' : ''}`,
+    class: `${n.resolved ? 'resolved' : ''} ${S.sel.note === n.id ? 'sel' : ''}`,
     style: { left: n.pin.x * 100 + '%', top: n.pin.y * 100 + '%', '--pc': n.author === 'you' ? 'var(--you)' : 'var(--claude)' },
     title: n.text,
     onpointerdown: e => e.stopPropagation(),

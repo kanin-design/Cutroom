@@ -73,10 +73,12 @@
     <section class="gridview" id="gridView" hidden></section>
 
     <div class="composer-bar" id="composerBar">
+        <div class="cb-files" id="cbFiles"></div>
         <button class="cb-scene" id="cbScene" title="What this message is about — click to choose another scene"></button>
         <button class="cb-frame" id="cbFrame" title="About this exact frame (F)"><span class="cb-check" data-icon="check"></span><span>Frame</span><span class="cb-tc" id="cbTc"></span></button>
         <div class="cb-field">
           <textarea id="cbText" rows="1" placeholder="Message Claude…" spellcheck="true"></textarea>
+          <button class="cb-clip" id="cbClip" title="Attach a file: a reference still, clip or PDF (or drop or paste one)" data-icon="clip"></button>
           <button class="cb-spot" id="cbSpot" title="Mark a spot on the frame (P)" data-icon="pin"></button>
         </div>
         <button class="cb-add" id="cbSend" title="Add this note (Enter). Claude gets nothing until you send.">Add<span class="k">⏎</span></button>

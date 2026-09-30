@@ -106,6 +106,7 @@ function connect() {
       S.presence = msg;
       emit('presence');
     } else if (msg.type === 'focus') emit('agent-focus', msg);
+    else if (msg.type === 'deleted') { es.close(); emit('board-deleted', msg.slug); }
     else if (msg.type === 'hello' || msg.type === 'build') {
       if (msg.build) emit('build', msg.build);
       if (msg.type === 'hello' && S.board && msg.rev !== S.board.rev) refetch();

@@ -316,7 +316,7 @@ function renderNotes() {
     } else {
       const t = noteTime(b, n);
       const x = xOf(t);
-      items.push({ n, kind: 'frame', t, x, x0: x - 9, min: 40, want: Math.min(300, 52 + n.text.length * 6.4) });
+      items.push({ n, kind: 'frame', t, x, x0: x - 9, min: 40, want: Math.min(300, 52 + (n.text || n.files?.[0]?.name || '').length * 6.4 + (n.files ? 16 : 0)) });
     }
   }
   items.sort((p, q) => p.x0 - q.x0 || (p.kind === 'scene' ? -1 : 1));
@@ -350,7 +350,7 @@ function renderNotes() {
     const n = it.n;
     const st = noteState(n);
     const top = it.row * ROW_H + 3;
-    const cls = `${it.kind} ${st} ${S.sel.note === n.id ? 'sel' : ''}`;
+    const cls = `${it.kind} ${st} ${n.pin ? 'spot' : ''} ${S.sel.note === n.id ? 'sel' : ''}`;
     const tip = `#${num(n)} ${n.author === 'you' ? 'You' : n.author}${it.kind === 'frame' ? ` · frame ${tc(it.t, b.fps)}${n.pin ? ' · spot' : ''}` : ' · the whole scene'} · ${noteStatus(n).label}\n${n.text}`;
     if (it.kind === 'frame') {
       const h0 = Y.notes - Y.scenes + top + 10;
@@ -365,7 +365,8 @@ function renderNotes() {
     },
       it.kind === 'frame' && h('i.ndot'),
       h('b', `#${num(n)}`),
-      h('span.ntxt', n.text.replace(/\s+/g, ' ')),
+      n.files && h('span.nclip', { html: icons.clip, title: `${n.files.length} file${n.files.length > 1 ? 's' : ''} attached` }),
+      h('span.ntxt', n.text.replace(/\s+/g, ' ') || n.files?.map(f => f.name).join(', ') || ''),
       st === 'replied' && h('span.nflag', { html: icons.reply, title: 'Claude replied' }),
       st === 'read' && h('span.nflag.read', { html: icons.check, title: 'Claude has read it' }),
       st === 'working' && h('span.nflag.working', { title: 'Claude is working on it' }),
@@ -391,8 +392,12 @@ const noteState = n => ({ draft: 'unsent', sent: 'open', agent: 'open', done: 'r
 
 function renderMarkers() {
   if (!S.board) return;
-  markersEl.replaceChildren(...S.board.markers.map(m => h('div.marker', {
-    style: { left: xOf(m.t) + 'px', '--mc': m.color || '#cfa25a' },
+  const sorted = [...S.board.markers].sort((a, b) => a.t - b.t);
+  markersEl.replaceChildren(...sorted.map((m, i) => {
+    const room = i + 1 < sorted.length ? xOf(sorted[i + 1].t) - xOf(m.t) - 3 : Infinity;
+    return h('div.marker', {
+    class: room < 22 ? 'flag-only' : '',
+    style: { left: xOf(m.t) + 'px', '--mc': m.color || '#cfa25a', maxWidth: room === Infinity ? null : Math.max(2, room) + 'px' },
     title: `${m.label} · ${short(m.t)} — right-click to edit`,
     onpointerdown: e => e.stopPropagation(),
     onclick: () => seek(m.t),
@@ -403,7 +408,8 @@ function renderMarkers() {
         { label: 'Delete marker', icon: 'trash', danger: true, onclick: () => commit([{ op: 'marker.remove', id: m.id }]) },
       ]);
     },
-  }, m.label)));
+  }, m.label);
+  }));
 }
 
 function renderAudioLabel() {
@@ -460,7 +466,12 @@ on('board', e => {
   if (e?.batches) scheduleGlowCleanup();
 });
 on('select', () => { renderNotes(); renderClips(); });
-on('presence', renderClips);
+let workingKey = '';
+on('presence', () => {
+  const say = activeSay();
+  const k = say?.scene ? `${say.scene}|${say.progress}|${say.text}` : '';
+  if (k !== workingKey) { workingKey = k; renderClips(); }
+});
 on('time', placePlayhead);
 on('ruler', requestDraw);
 

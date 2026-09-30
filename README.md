@@ -25,27 +25,27 @@ There is nothing to install: Node 22 and ffmpeg are all it needs.
   - The Notes lane shows every note in time. The Audio lane shows the soundtrack's waveform.
   - Right-click the ruler to add a marker.
 - **Notes to Claude.** Write in the bar under the monitor (press C).
-  - It always shows what the message is about: the scene you're in, with its colour, number and title.
-    Click it to pick another scene or the whole board.
-  - Turn on **Frame** (F) to make it about the exact frame you're on; the timecode and frame number show
-    in the bar. Press P, or the pin in the bar, to also mark a spot on the frame.
-  - Enter sends. Typing pauses playback, so the frame doesn't move.
-  - Open notes stay on the timeline until they're resolved. A frame note is a pin with a line down
-    through the clip at its exact frame; a scene note is a bar across the scene. Hover to read one, and
-    click to open its thread.
-  - Paused on a frame note's frame, you see the note on the monitor.
-  - The Notes panel groups every note by scene, in the order of the cut. Each note is labelled FRAME
-    (with its timecode, click to go there) or WHOLE SCENE. The scene you're in is marked.
-  - Claude reads the same labels, can look at the exact frame you meant, replies in the thread, and
-    resolves the note when it's done.
-- **Renders.** Drop a still or a clip onto a scene, onto the monitor, or onto a scene's Renders list.
-  Every version is kept; click one to make it the one that plays. Drop onto empty timeline to make
-  a new scene from the file, or onto the Audio lane to set the soundtrack.
+  - It always shows what the note is about: the scene you're in (click to pick another, or the whole
+    board). Turn on **Frame** (F) for the exact frame you're on.
+  - Press P, or the pin, and click the picture to write about one spot of the frame, in a card beside it.
+  - Attach references: the paperclip, a drop, or ⌘V a screenshot. Stills and clips show as thumbnails.
+  - Enter adds a note as a draft. Claude sees nothing until you press **Send to Claude** (⌘⏎); sending
+    means it can start work (without re-rendering, unless a note asks for that).
+  - Each note shows where it stands: Draft, Sent, Read (Claude has it), Working, Replied, Resolved.
+  - Open notes sit on the timeline with their words: a frame note at its frame (a pin shape when it
+    marks a spot), a scene note across its scene. A pin shows on the picture only on its own frame.
+  - The Notes panel groups notes by scene, in the order of the cut; picking one takes you to it.
+- **Versions.** Every still, clip or sketch on a scene is kept, oldest to newest; click one to make it
+  the one that plays. Drop a file onto a scene, the monitor or the Versions list to add one, onto empty
+  timeline for a new scene, or onto the Audio lane for the soundtrack.
 - **Board view (G).** The classic storyboard wall: one panel per scene, with the text underneath.
   Drag panels to reorder.
-- **Activity.** Every change, whether yours or Claude's, with who made it and when. Scenes Claude has
-  just touched glow on the timeline. The pill in the top bar shows what Claude is doing, and
-  whether it is waiting for your edits.
+- **Claude, in the top bar.** Who owns the board, whether it's listening for your notes, and what it's
+  doing, on which shot, and how far along (that shot shows it on the timeline too).
+- **Activity.** Every change, yours or Claude's. Any agent change can be **reverted**: it shows what the
+  revert will do first, and ⌘Z undoes the revert.
+- **Boards.** The switcher lists boards newest first, with their owner, a dot when an agent is
+  listening, and how many notes wait on you. Archive old boards to hide them (nothing is deleted).
 
 Press `?` in the editor for every shortcut.
 
@@ -68,9 +68,14 @@ the editor.) The API covers:
   points at with its pin drawn. The sheets are drawn natively by `tools/sheet.swift`.
 - **Changing:** atomic batches of ops, with dry runs, a check that the board hasn't changed since
   you read it, and ops that undo each batch.
-- **Renders and sound:** put a still or a clip on a scene from a path on disk, and set the soundtrack.
-- **Talking to you:** a status line in your top bar, and moving your playhead to what it's talking about.
-- **Waiting:** a long-poll that returns when you edit the board.
+- **Renders and sound:** put a still or a clip on a scene from a path on disk, cut a whole film into a
+  new version of every scene in one call, and set the soundtrack.
+- **Talking to you:** a status line in your top bar (optionally about one shot, with progress), and
+  moving your playhead to what it's talking about. Replies and notes can carry files.
+- **Listening:** `sb wait` returns when you send notes, and rides out server restarts.
+
+The server started by `sb start` restarts itself when its own code changes (after checking the new code
+parses, and falling back if it doesn't start), so agents never talk to an out-of-date server.
 
 How agents find out about it:
 - `AGENTS.md` and `CLAUDE.md` point any agent working in this folder to the manual.

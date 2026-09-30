@@ -11,10 +11,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import crypto from 'node:crypto';
+import { spawn, execFileSync } from 'node:child_process';
 import * as store from './lib/store.js';
-import { applyOps, findScene, defaultDuration, placement, activeRender } from './lib/ops.js';
+import { applyOps, findScene, defaultDuration, placement, activeRender, forYou } from './lib/ops.js';
 import { boardText } from './lib/text.js';
-import { ingestRender, ingestAudio, mediaKind, stamp, libSource } from './lib/media.js';
+import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment } from './lib/media.js';
 import { agentApi, makeSay } from './lib/agent.js';
 import { makeSketch, drawnStale, redrawCode } from './lib/sketch.js';
 import { watchSketches } from './lib/folder.js';
@@ -30,6 +31,7 @@ const MIME = {
   '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.m4v': 'video/mp4',
   '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
+  '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
 };
 
 // ---------------------------------------------------------------- the editor's build
@@ -50,6 +52,7 @@ for (const d of BUILD_DIRS) {
   fs.watch(path.join(store.ROOT, d), () => {
     clearTimeout(buildTimer);
     buildTimer = setTimeout(() => {
+      restartOnNewCode();
       const next = computeBuild();
       if (next === BUILD) return;
       BUILD = next;
@@ -57,6 +60,45 @@ for (const d of BUILD_DIRS) {
     }, 600);
   }).on('error', () => {});
 }
+
+// ---------------------------------------------------------------- staying current
+// Started by `sb start` (SB_AUTORESTART=1), the server restarts itself when its own code changes, so
+// agents never meet an old server that lacks what the manual describes. New code that doesn't parse,
+// or a new server that doesn't come up, leaves this one running.
+const serverFiles = () => ['server.js', ...fs.readdirSync(path.join(store.ROOT, 'lib')).filter(f => f.endsWith('.js')).map(f => `lib/${f}`)];
+const serverCode = () => {
+  const h = crypto.createHash('sha1');
+  for (const f of serverFiles()) h.update(f).update(fs.readFileSync(path.join(store.ROOT, f)));
+  return h.digest('hex');
+};
+let SERVER_CODE = serverCode();
+let restarting = false;
+async function restartOnNewCode() {
+  if (process.env.SB_AUTORESTART !== '1' || restarting) return;
+  const next = serverCode();
+  if (next === SERVER_CODE) return;
+  for (const f of serverFiles()) {
+    try { execFileSync(process.execPath, ['--check', path.join(store.ROOT, f)], { stdio: 'pipe' }); } catch {
+      console.warn(`[restart] the code changed, but ${f} doesn't parse; staying on the running code`);
+      return;
+    }
+  }
+  restarting = true;
+  console.log('[restart] the server code changed; handing over to a new server');
+  server.close();
+  for (const L of live.values()) { for (const c of L.clients) c.res.end(); L.clients.clear(); }
+  const child = spawn(process.execPath, process.argv.slice(1), { detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: process.env });
+  child.unref();
+  for (let i = 0; i < 50; i++) {
+    await new Promise(r => setTimeout(r, 200));
+    try { if ((await fetch(`http://${HOST}:${PORT}/api/ping`)).ok) { console.log('[restart] the new server is up'); process.exit(0); } } catch {}
+  }
+  console.warn('[restart] the new server did not come up (see above); carrying on with the running code');
+  SERVER_CODE = next;
+  restarting = false;
+  try { server.listen(PORT, HOST); } catch (e) { console.error(`[restart] couldn't listen again: ${e.message}`); }
+}
+fs.watch(path.join(store.ROOT, 'server.js'), () => { clearTimeout(buildTimer); buildTimer = setTimeout(restartOnNewCode, 600); }).on('error', () => {});
 
 // ---------------------------------------------------------------- live boards
 
@@ -159,8 +201,12 @@ async function redraw(L) {
 }
 
 function broadcast(L, msg) {
+  if (restarting) return; // handing over to a new server: its pages reconnect there
   const data = `data: ${JSON.stringify(msg)}\n\n`;
-  for (const c of L.clients) c.res.write(data);
+  for (const c of L.clients) {
+    if (c.res.writableEnded || c.res.destroyed) { L.clients.delete(c); continue; }
+    try { c.res.write(data); } catch { L.clients.delete(c); }
+  }
 }
 
 function presence(L) {
@@ -202,7 +248,15 @@ async function api(req, res, url, [a, slug, action]) {
   if (a !== 'boards') return send(res, 404, { error: `/api is the editor's own API — agents: use http://${req.headers.host}/agent` });
 
   if (!slug) {
-    if (req.method === 'GET') return send(res, 200, { boards: store.list() });
+    if (req.method === 'GET') {
+      // For the switcher: who owns each board, whether an agent is listening, and what waits on you.
+      const boards = store.list().map(x => {
+        const b = live.get(x.slug)?.board || store.read(x.slug);
+        const L = live.get(x.slug);
+        return { ...x, listening: L ? presence(L).watching : 0, forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length };
+      });
+      return send(res, 200, { boards });
+    }
     if (req.method === 'POST') {
       const body = await json(req);
       const created = store.create(body.slug ? store.slugify(body.slug) : store.uniqueSlug(body.title || 'Untitled'), body);
@@ -237,6 +291,26 @@ async function api(req, res, url, [a, slug, action]) {
     return send(res, 200, { ok: true });
   }
   if (action === 'ingest') return ingest(req, res, L, url);
+  if (action === 'attach') return attach(req, res, L, url);
+  if (action === 'delete') {
+    if (req.headers['x-storyboard'] !== '1') return send(res, 403, { error: 'missing x-storyboard header' });
+    return send(res, 200, deleteBoard(L));
+  }
+  if (action === 'revert') {
+    // What undoing one logged change (an agent's, typically) would do now: the ops and one sentence
+    // each, checked against the current board. The page shows that, then commits the ops itself, so
+    // the revert is one of the user's own changes (and ⌘Z undoes it).
+    const rev = +(await json(req)).rev;
+    const entry = store.readLog(L.slug, { since: rev - 1, limit: 100000 }).find(e => e.rev === rev);
+    if (!entry?.inverse?.length) return send(res, 404, { error: `rev ${rev} has nothing to revert` });
+    try {
+      const { summaries } = applyOps(L.board, entry.inverse, { author: 'you', now: new Date().toISOString() });
+      const later = store.readLog(L.slug, { since: rev, limit: 100000 }).filter(e => e.author !== 'storyboard').length;
+      return send(res, 200, { rev, ops: entry.inverse, summaries, later });
+    } catch (e) {
+      return send(res, 409, { error: `can't revert rev ${rev} any more: ${e.message}` });
+    }
+  }
   send(res, 404, { error: 'not found' });
 }
 
@@ -273,6 +347,42 @@ async function ingest(req, res, L, url) {
   }
 }
 
+// A file for a note or reply: saved into the board's media/refs, described back to the page, which
+// puts it on the note it then adds.
+async function attach(req, res, L, url) {
+  if (req.headers['x-storyboard'] !== '1') return send(res, 403, { error: 'missing x-storyboard header' });
+  const name = path.basename(url.searchParams.get('name') || 'file');
+  const tmp = path.join(os.tmpdir(), `sb-${stamp()}-${name}`);
+  await pipeline(req, fs.createWriteStream(tmp));
+  try {
+    return send(res, 200, { file: await saveAttachment(store.dir(L.slug), tmp, name) });
+  } catch (e) {
+    return send(res, e.status || 500, { error: e.message });
+  } finally {
+    fs.rm(tmp, { force: true }, () => {});
+  }
+}
+
+// Deleting a board moves its folder to the Trash, so it can still be brought back until the Trash is
+// emptied. Open editors move on to another board, and agents listening on it are told it's gone.
+function deleteBoard(L) {
+  const trash = path.join(os.homedir(), '.Trash');
+  fs.mkdirSync(trash, { recursive: true });
+  let to = path.join(trash, `storyboard ${L.slug}`);
+  if (fs.existsSync(to)) to += ` ${new Date().toISOString().slice(0, 19).replace(/:/g, '.')}`;
+  broadcast(L, { type: 'deleted', slug: L.slug });
+  for (const c of L.clients) c.res.end();
+  L.clients.clear();
+  for (const w of [...L.waiters]) w({ deleted: true });
+  L.watcher?.close();
+  L.sketchWatcher?.close();
+  clearTimeout(L.redrawTimer);
+  live.delete(L.slug);
+  fs.renameSync(store.dir(L.slug), to);
+  console.log(`[${L.slug}] deleted by the user (moved to ${to})`);
+  return { ok: true, trash: to };
+}
+
 function events(req, res, L, url) {
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
   res.write('retry: 1000\n\n');
@@ -281,7 +391,7 @@ function events(req, res, L, url) {
   res.write(`data: ${JSON.stringify({ type: 'hello', rev: L.board.rev, build: BUILD })}\n\n`);
   res.write(`data: ${JSON.stringify(presence(L))}\n\n`);
   if (c.role === 'agent') broadcast(L, presence(L));
-  const ping = setInterval(() => res.write(': ping\n\n'), 20000);
+  const ping = setInterval(() => { if (!res.writableEnded) res.write(': ping\n\n'); }, 20000);
   req.on('close', () => {
     clearInterval(ping);
     L.clients.delete(c);
@@ -301,7 +411,8 @@ function file(req, res, p) {
   let st;
   try { st = fs.statSync(p); } catch { return send(res, 404, { error: 'not found' }); }
   if (!st.isFile()) return send(res, 404, { error: 'not found' });
-  const type = MIME[path.extname(p).toLowerCase()] || 'application/octet-stream';
+  let type = MIME[path.extname(p).toLowerCase()] || 'application/octet-stream';
+  if (p.includes(`${path.sep}refs${path.sep}`) && /html|javascript/.test(type)) type = 'text/plain; charset=utf-8';
   const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', ...(type === 'image/svg+xml' ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:" } : {}), 'Cache-Control': p.includes(`${path.sep}media${path.sep}`) ? 'max-age=31536000, immutable' : 'no-cache' };
   const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
   if (range) {

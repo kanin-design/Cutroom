@@ -4,11 +4,12 @@
 
 import { S, on, emit, commit, select, scene, mediaUrl, sceneRange, upload, here, activeSay } from './store.js';
 import { STATUSES, COLORS, activeRender, layout, noteTime, findScene } from '/lib/ops.js';
-import { $, h, secs, short, ago, debounce, autosize, toast, menu, ask, tc as tcFmt } from './util.js';
+import { $, h, secs, short, ago, debounce, autosize, toast, menu, closeMenu, ask, tc as tcFmt } from './util.js';
 import { icons } from './icons.js';
 import { seek } from './player.js';
 import { STATUS_COLOR, sceneColor } from './viewer.js';
 import { actions } from './actions.js';
+import { wire, chips, takeFiles, pendingFiles, fileRow } from './attach.js';
 
 const panel = $('#panel'), tabs = $('#tabs'), notesCount = $('#notesCount');
 const drafts = new Map();
@@ -44,16 +45,61 @@ function bound(key, value, save, { tag = 'input', cls = '', placeholder = '', ty
   return el;
 }
 
-// A free text box (composer, reply) whose draft survives re-renders.
+// Long prose an agent often writes in markdown (the brief, the treatment): shown formatted, edited
+// as text. Click it to edit; leaving the field shows it formatted again.
+const editing = new Set();
+function prose(key, value, save, placeholder) {
+  if (editing.has(key) || !String(value || '').trim()) {
+    const ta = bound(key, value, save, { tag: 'textarea', placeholder });
+    ta.addEventListener('blur', () => { if (editing.delete(key)) requestAnimationFrame(render); });
+    if (editing.has(key)) requestAnimationFrame(() => { if (!restoring && document.activeElement !== ta) ta.focus(); });
+    return ta;
+  }
+  return h('div.md', { title: 'Click to edit', html: markdown(value), onclick: e => { if (e.target.closest('a')) return; editing.add(key); render(); } });
+}
+
+// Just enough markdown for a treatment: headings, lists, bold, italics, code and links. Escaped first.
+function markdown(src) {
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>')
+    .replace(/(^|\W)_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  const out = [];
+  let list = null, para = [];
+  const flush = () => {
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    para = [];
+    if (list) { out.push(`</${list}>`); list = null; }
+  };
+  for (const line of String(src).split('\n')) {
+    const hd = /^(#{1,4})\s+(.*)$/.exec(line);
+    const li = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/.exec(line);
+    if (hd) { flush(); out.push(`<h${Math.min(4, hd[1].length + 2)}>${inline(hd[2])}</h${Math.min(4, hd[1].length + 2)}>`); }
+    else if (li) {
+      if (para.length) { out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; }
+      const kind = li[1] ? 'ol' : 'ul';
+      if (list !== kind) { if (list) out.push(`</${list}>`); out.push(`<${kind}>`); list = kind; }
+      out.push(`<li>${inline(li[2])}</li>`);
+    } else if (!line.trim()) flush();
+    else { if (list) { out.push(`</${list}>`); list = null; } para.push(line); }
+  }
+  flush();
+  return out.join('');
+}
+
+// A free text box (a reply) whose draft and attached files survive re-renders.
 function draftBox(key, placeholder, submit, { rows = 1, label = 'Send' } = {}) {
   const ta = h('textarea.field', { placeholder, rows, 'data-key': key });
   ta.value = drafts.get(key) || '';
   const go = async () => {
     const v = ta.value.trim();
-    if (!v) return;
+    if (!v && !pendingFiles(key).length) return;
     drafts.delete(key);
     ta.value = '';
-    await submit(v);
+    await submit(v, await takeFiles(key));
   };
   ta.addEventListener('input', () => drafts.set(key, ta.value));
   ta.addEventListener('keydown', e => {
@@ -62,7 +108,10 @@ function draftBox(key, placeholder, submit, { rows = 1, label = 'Send' } = {}) {
     if (e.key === 'Escape') ta.blur();
   });
   autosize(ta);
-  return h('div.composer', ta, h('button.text-btn.primary.send', { onclick: go }, label));
+  const clip = h('button.icon-btn.clip', { title: 'Attach a file (or drop or paste one)', html: icons.clip });
+  const box = h('div.composer', ta, clip, h('button.text-btn.primary.send', { onclick: go }, label));
+  wire(key, { button: clip, zone: box, field: ta, onchange: () => render() });
+  return [chips(key, () => render()), box];
 }
 
 function render() {
@@ -251,11 +300,11 @@ function boardPanel() {
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Brief')),
-      bound('board:brief', b.brief, (v, k) => set({ brief: v }, k), { tag: 'textarea', placeholder: 'The idea, the tone, the rules — what the film is.' }),
+      prose('board:brief', b.brief, (v, k) => set({ brief: v }, k), 'The idea, the tone, the rules — what the film is.'),
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Treatment')),
-      bound('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), { tag: 'textarea', placeholder: 'The full plan: story beats, look, rules, references…' }),
+      prose('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), 'The full plan: story beats, look, rules, references…'),
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Project folder')),
@@ -350,8 +399,12 @@ function noteCard(n) {
     class: `${selected ? 'sel' : ''} st-${st.key}`,
     'data-note': n.id,
     onclick: e => {
-      if (e.target.closest('button, textarea, .scope')) return;
-      S.sel = { scene: S.sel.scene, note: selected ? null : n.id };
+      if (e.target.closest('button, textarea, .scope, a')) return;
+      // Picking a frame note takes you to its frame (where its pin is); picking it again there lets go.
+      const t = n.at != null ? noteTime(b, n) : null;
+      const away = t != null && Math.round(S.t * b.fps) !== Math.round(t * b.fps);
+      S.sel = { scene: S.sel.scene, note: selected && !away ? null : n.id };
+      if (away) seek(t);
       emit('select');
     },
   },
@@ -365,15 +418,16 @@ function noteCard(n) {
       ),
       h('span.note-status', { class: `s-${st.key}`, title: st.tip }, st.label),
     ),
-    longText(n.id, h('div.note-text', n.text), n.text),
-    n.replies.length > 0 && h('div.replies', n.replies.map((r, i) => h('div.reply', whoEl(r.author), longText(`${n.id}.${i}`, h('div.reply-text', r.text), r.text)))),
+    n.text && longText(n.id, h('div.note-text', n.text), n.text),
+    fileRow(n.files),
+    n.replies.length > 0 && h('div.replies', n.replies.map((r, i) => h('div.reply', whoEl(r.author), r.text && longText(`${n.id}.${i}`, h('div.reply-text', r.text), r.text), fileRow(r.files)))),
     h('div.note-foot',
       h('span.when', ago(n.created), n.resolved && n.resolvedBy && ` · resolved by ${n.resolvedBy === 'you' ? 'you' : nameOf(n.resolvedBy)}`),
       h('span.grow'),
       !draft && !n.resolved && !selected && h('button.link', { onclick: () => { S.sel = { scene: S.sel.scene, note: n.id }; emit('select'); } }, 'Reply'),
       !draft && h('button.link', { class: n.resolved ? 'reopen' : 'done', onclick: () => commit([{ op: 'note.set', id: n.id, fields: { resolved: !n.resolved } }]) }, n.resolved ? 'Reopen' : 'Mark done'),
     ),
-    selected && !draft && !n.resolved && h('div.reply-box', draftBox(`reply:${n.id}`, 'Reply…', text => commit([{ op: 'reply.add', note: n.id, reply: { text } }]), { label: 'Reply' })),
+    selected && !draft && !n.resolved && h('div.reply-box', draftBox(`reply:${n.id}`, 'Reply…', (text, files) => commit([{ op: 'reply.add', note: n.id, reply: { text, ...(files.length ? { files } : {}) } }]), { label: 'Reply' })),
   );
 }
 
@@ -427,15 +481,34 @@ function notesPanel() {
 
 // ---------------------------------------------------------------- activity
 
+// Every change, newest first. An agent's change can be reverted from here (your own undo is ⌘Z).
 function activityPanel() {
   if (!S.activity.length) return h('div.hint', 'Nothing has happened yet.');
+  // Show what reverting would do before doing it; the revert is then your own (undoable) change.
+  const revert = async (e, ev) => {
+    const at = ev.currentTarget.getBoundingClientRect();
+    const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/revert`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ rev: e.rev }) });
+    const j = await r.json();
+    if (!r.ok) return toast(j.error, { err: true, ms: 6000 });
+    const lines = j.summaries.slice(0, 6);
+    const pop = h('div.pop.revert-pop',
+      h('h3', `Revert rev ${e.rev}?`),
+      h('p', 'This will:'),
+      h('ul', lines.map(s => h('li', s)), j.summaries.length > lines.length && h('li.more', `and ${j.summaries.length - lines.length} more`)),
+      j.later > 0 && h('p.warn', `${j.later} later change${j.later > 1 ? 's' : ''} came after this one. Anything built on it goes too.`),
+      h('div.row', h('button.text-btn', { onclick: () => closeMenu() }, 'Cancel'),
+        h('button.text-btn.primary', { onclick: async () => { closeMenu(); if (await commit(j.ops)) toast(`Reverted rev ${e.rev} · ⌘Z brings it back`); } }, 'Revert')),
+    );
+    menu(Math.max(8, at.right - 330), at.bottom + 6, [], { el: pop });
+  };
   return h('div.activity', S.activity.slice(0, 150).map(e => {
     const you = e.author === 'you';
+    const agent = !you && e.author !== 'storyboard';
     return h('div.act-row',
       h('span.avatar', { class: you ? '' : 'claude', html: you ? 'Y' : icons.spark }),
       h('div',
         h('div.what', e.summaries.map((s, i) => h('div', i === 0 && h('b', you ? 'You ' : `${e.author[0].toUpperCase()}${e.author.slice(1)} `), s))),
-        h('div.when', `${ago(e.created)} · rev ${e.rev}`),
+        h('div.when', `${ago(e.created)} · rev ${e.rev}`, agent && h('button.link.revert', { title: 'Undo this change (shows what it will do first)', onclick: ev => revert(e, ev) }, 'Revert')),
       ),
     );
   }));

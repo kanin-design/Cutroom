@@ -9,9 +9,10 @@ import { $, h, tc, menu, closeMenu, toast, clamp } from './util.js';
 import { icons } from './icons.js';
 import { pause } from './player.js';
 import { sceneColor, setPinning } from './viewer.js';
+import { wire, chips, takeFiles, pendingFiles } from './attach.js';
 
 const bar = $('#composerBar'), sceneBtn = $('#cbScene'), frameBtn = $('#cbFrame'), tcEl = $('#cbTc');
-const text = $('#cbText'), spotBtn = $('#cbSpot'), sendBtn = $('#cbSend'), sendAllBtn = $('#cbSendAll');
+const text = $('#cbText'), spotBtn = $('#cbSpot'), sendBtn = $('#cbSend'), sendAllBtn = $('#cbSendAll'), filesEl = $('#cbFiles');
 
 // target: 'here' (the scene under the playhead) or 'board'
 S.noteTarget = 'here';
@@ -51,7 +52,7 @@ function render() {
     : frameOn
       ? `Add a note about this frame of “${hit.scene.title}”…`
       : `Add a note about “${hit.scene.title}”…`;
-  sendBtn.disabled = !text.value.trim();
+  sendBtn.disabled = !text.value.trim() && !pendingFiles('bar').length;
   const unsent = unsentNotes().length;
   sendAllBtn.hidden = !unsent;
   if (unsent) sendAllBtn.replaceChildren(h('span', { html: icons.spark, style: { display: 'inline-grid' } }), `Send ${unsent} to Claude`);
@@ -82,6 +83,7 @@ const frameEl = $('#frame');
 let card = null;
 
 function closeCard() {
+  takeFiles('card');
   card?.el.remove();
   card = null;
   S.draftPin = null;
@@ -102,13 +104,21 @@ on('spot', p => {
   // Text already typed in the bar comes along.
   if (text.value.trim()) { ta.value = text.value; text.value = ''; fit(); }
   const addBtn = h('button.fn-add', { onclick: () => addFromCard(false) }, 'Add', h('span.k', '⏎'));
+  const clipBtn = h('button.fn-clip', { title: 'Attach a file (or drop or paste one)', html: icons.clip });
+  const cardFiles = h('div.fn-files');
   const el = h('div.fnote', { onpointerdown: e => e.stopPropagation(), onclick: e => e.stopPropagation(), ondblclick: e => e.stopPropagation() },
     h('div.fn-head', h('span', { html: icons.pin, style: { display: 'inline-grid' } }), h('b', `Frame ${tc(t, b.fps)}`), h('span.mono', `f${Math.round(t * b.fps)}`), h('span.fn-scene', `${String(hit.index + 1).padStart(2, '0')} ${hit.scene.title}`),
       h('button.fn-close', { title: 'Cancel (Esc)', html: icons.x, onclick: closeCard })),
     ta,
-    h('div.fn-foot', h('span.fn-hint', '⌘⏎ adds it and sends your notes'), addBtn),
+    cardFiles,
+    h('div.fn-foot', clipBtn, h('span.fn-hint', '⌘⏎ adds it and sends your notes'), addBtn),
   );
-  const sync = () => { addBtn.disabled = !ta.value.trim(); };
+  const sync = () => {
+    addBtn.disabled = !ta.value.trim() && !pendingFiles('card').length;
+    cardFiles.replaceChildren(...[chips('card', sync)].filter(Boolean));
+    place();
+  };
+  wire('card', { button: clipBtn, zone: el, field: ta, onchange: sync });
   ta.addEventListener('input', () => { sync(); ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight) + 'px'; });
   ta.addEventListener('keydown', e => {
     e.stopPropagation();
@@ -141,8 +151,9 @@ new ResizeObserver(place).observe(frameEl);
 async function addFromCard(send) {
   if (!card) return;
   const body = card.ta.value.trim();
-  if (body) {
-    const j = await commit([{ op: 'note.add', note: { scene: card.scene, at: card.at, pin: card.pin, text: body } }]);
+  if (body || pendingFiles('card').length) {
+    const files = await takeFiles('card');
+    const j = await commit([{ op: 'note.add', note: { scene: card.scene, at: card.at, pin: card.pin, text: body, ...(files.length ? { files } : {}) } }]);
     if (!j) return;
     S.sel = { scene: card.scene, note: j.ops[0].note.id };
     emit('select');
@@ -157,7 +168,7 @@ const unsentNotes = () => (S.board ? S.board.notes.filter(n => n.author === 'you
 // Enter: add the note to the board. Claude doesn't get it until you send.
 async function add() {
   const body = text.value.trim();
-  if (!body) {
+  if (!body && !pendingFiles('bar').length) {
     bar.classList.remove('shake');
     void bar.offsetWidth;
     bar.classList.add('shake');
@@ -167,6 +178,9 @@ async function add() {
   const frameOn = S.noteFrame && !!hit;
   const note = { scene: hit ? hit.scene.id : null, text: body };
   if (frameOn) note.at = snapFrame(S.board, hit.local);
+  const files = await takeFiles('bar');
+  if (files.length) note.files = files;
+  showFiles();
   const j = await commit([{ op: 'note.add', note }]);
   if (!j) return;
   text.value = '';
@@ -182,7 +196,7 @@ async function add() {
 
 // Send: hand every unsent note to Claude at once, then say honestly whether anyone received them.
 export async function sendAll() {
-  if (text.value.trim()) await add();
+  if (text.value.trim() || pendingFiles('bar').length) await add();
   const notes = unsentNotes();
   if (!notes.length) return toast('No unsent notes. Add notes first, then send them.');
   const j = await commit([{ op: 'notes.send', ids: notes.map(n => n.id) }]);
@@ -229,6 +243,13 @@ text.addEventListener('keydown', e => {
   if (e.key === 'Escape') { e.preventDefault(); setPinning(false); text.blur(); }
 });
 sendBtn.addEventListener('click', add);
+
+// Files on the bar's note: the paperclip, a drop on the bar, or a paste into the field.
+function showFiles() {
+  filesEl.replaceChildren(...[chips('bar', showFiles)].filter(Boolean));
+  sendBtn.disabled = !text.value.trim() && !pendingFiles('bar').length;
+}
+wire('bar', { button: $('#cbClip'), zone: bar, field: text, onchange: showFiles });
 sendAllBtn.addEventListener('click', sendAll);
 frameBtn.addEventListener('click', () => setFrame(!S.noteFrame));
 spotBtn.addEventListener('click', () => {

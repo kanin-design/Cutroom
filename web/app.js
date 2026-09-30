@@ -1,7 +1,7 @@
 // Boot, top bar, board switching, keyboard and the bits of chrome that tie the panels together.
 
 import { S, on, emit, openBoard, undo, redo, select, commit, scene, activeSay, sceneRange } from './store.js';
-import { $, h, menu, modal, toast, typing, clamp, short } from './util.js';
+import { $, h, menu, closeMenu, modal, toast, typing, clamp, short, ago } from './util.js';
 import { hydrateIcons, icons } from './icons.js';
 import { play, pause, toggle, seek, setMuted, end } from './player.js';
 import { setPinning } from './viewer.js';
@@ -24,7 +24,7 @@ on('board', () => {
   if (!b) return;
   boardTitle.textContent = b.title;
   document.title = `${b.title} · Storyboard`;
-  boardMeta.textContent = [`${b.width}×${b.height}`, `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, `${b.scenes.length} scene${b.scenes.length === 1 ? '' : 's'}`, short(end())].filter(Boolean).join(' · ');
+  boardMeta.textContent = [`${b.width}×${b.height}`, `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, `${b.scenes.length} scene${b.scenes.length === 1 ? '' : 's'}`, short(end()), b.archived && 'archived'].filter(Boolean).join(' · ');
   $('#rulerSeg').hidden = !b.bpm;
   if (!b.bpm && S.ruler === 'bars') S.ruler = 'time';
 });
@@ -80,17 +80,68 @@ function renderForYou() {
 }
 on('board', renderForYou);
 
-$('#boardSwitch').addEventListener('click', async e => {
-  const r = e.currentTarget.getBoundingClientRect();
+// The boards, newest first: who owns each, whether an agent is listening, and what's waiting on you.
+// Archiving hides a board from here and from the agents' overview; nothing is deleted.
+let showArchived = false;
+async function boardMenu(anchor) {
+  const r = anchor.getBoundingClientRect();
   const { boards } = await (await fetch('/api/boards')).json();
+  const current = boards.filter(b => !b.archived), archived = boards.filter(b => b.archived);
+  const row = b => h('div.brow', { class: b.slug === S.slug ? 'cur' : '' },
+    h('button.bmain', { onclick: () => { closeMenu(); location.hash = b.slug; } },
+      h('span.bt', b.title),
+      h('span.bsub', [b.owner || 'no owner', ago(new Date(b.updated).toISOString()), `${b.scenes} scene${b.scenes === 1 ? '' : 's'}`].join(' · ')),
+    ),
+    b.forYou > 0 && h('span.bfor', { title: `${b.forYou} note${b.forYou > 1 ? 's' : ''} waiting on you` }, String(b.forYou)),
+    b.listening > 0 && h('i.blisten', { title: 'An agent is listening for your notes' }),
+    h('button.barch', { title: b.archived ? 'Bring back' : 'Archive: hide it from the lists (nothing is deleted)', html: icons[b.archived ? 'unarchive' : 'archive'], onclick: async ev => {
+      ev.stopPropagation();
+      await fetch(`/api/boards/${encodeURIComponent(b.slug)}/ops`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ops: [{ op: 'board.set', fields: { archived: !b.archived } }], author: 'you' }) });
+      boardMenu(anchor);
+    } }),
+    h('button.barch.bdel', { title: 'Delete: move the board to the Trash', html: icons.trash, onclick: ev => { ev.stopPropagation(); confirmDelete(b, ev.currentTarget); } }),
+  );
   menu(r.left, r.bottom + 6, [
     { head: 'Boards' },
-    { node: h('div.boards', boards.map(b => h('button', { class: b.slug === S.slug ? 'cur' : '', onclick: () => { location.hash = b.slug; } },
-      h('span', { html: icons.film, style: { display: 'inline-grid' } }), b.title, h('span.bmeta', `${b.scenes} · ${b.duration.toFixed(1)}s`)))) },
+    { node: h('div.boards', current.map(row)) },
+    archived.length > 0 && { node: h('button.barch-toggle', { onclick: () => { showArchived = !showArchived; boardMenu(anchor); } }, `${showArchived ? 'Hide' : 'Show'} ${archived.length} archived`) },
+    showArchived && archived.length > 0 && { node: h('div.boards.archived', archived.map(row)) },
     '-',
     { label: 'Export animatic (mp4)', icon: 'film', onclick: () => exportAnimatic() },
     { label: 'New board…', icon: 'plus', onclick: () => newBoardDialog() },
-  ]);
+  ].filter(Boolean), { cls: 'board-menu' });
+}
+$('#boardSwitch').addEventListener('click', e => boardMenu(e.currentTarget));
+
+// Deleting moves the board's folder to the Trash; emptying the Trash is what frees the space.
+function confirmDelete(b, at) {
+  const r = at.getBoundingClientRect();
+  const pop = h('div.pop.delete-pop',
+    h('h3', `Delete “${b.title}”?`),
+    h('p', `${b.scenes} scene${b.scenes === 1 ? '' : 's'}${b.open ? `, ${b.open} open note${b.open > 1 ? 's' : ''}` : ''} and all its media go to the Trash. It can be brought back from there until you empty it.`),
+    b.listening > 0 && h('p.warn', 'An agent is listening on this board; it will be told the board is gone.'),
+    h('div.row',
+      h('button.text-btn', { onclick: () => closeMenu() }, 'Cancel'),
+      h('button.text-btn.primary.danger-fill', { onclick: async () => {
+        closeMenu();
+        const res = await fetch(`/api/boards/${encodeURIComponent(b.slug)}/delete`, { method: 'POST', headers: { 'x-storyboard': '1' } });
+        const j = await res.json();
+        if (!res.ok) return toast(j.error, { err: true });
+        toast(`Deleted “${b.title}” · it's in the Trash`);
+        if (b.slug !== S.slug) boardMenu($('#boardSwitch'));
+      } }, 'Delete'),
+    ),
+  );
+  menu(Math.min(r.left, innerWidth - 340), r.bottom + 6, [], { el: pop });
+}
+
+// This board was deleted (here or in another tab): move on to another one.
+on('board-deleted', slug => {
+  if (slug !== S.slug) return;
+  S.slug = null;
+  try { localStorage.removeItem('sb.board'); } catch {}
+  history.replaceState(null, '', location.pathname);
+  route();
 });
 
 // The whole cut as one mp4 (renders, sketches, cards and the soundtrack), downloaded when ready.
@@ -357,7 +408,7 @@ async function route() {
   if (!pick) {
     let last = null;
     try { last = localStorage.getItem('sb.board'); } catch {}
-    pick = boards.find(b => b.slug === last)?.slug || boards[0].slug;
+    pick = boards.find(b => b.slug === last)?.slug || (boards.find(b => !b.archived) || boards[0]).slug;
     history.replaceState(null, '', `#${pick}`);
   }
   document.querySelector('.welcome')?.remove();
