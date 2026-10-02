@@ -1,7 +1,7 @@
 // Editing commands shared by the keyboard, menus and buttons.
 
 import { S, emit, commit, select, here, sceneRange, upload, scene } from './store.js';
-import { snapFrame, defaultDuration, layout } from '/lib/ops.js';
+import { snapFrame, defaultDuration, layout, noteTime } from '/lib/ops.js';
 import { toast } from './util.js';
 import { play, pause, seek } from './player.js';
 
@@ -73,6 +73,27 @@ export const actions = {
       if (S.playing) pause();
       seek(Math.min(t, cuts.at(-1)));
     }
+  },
+
+  // The open notes on the timeline, in time order (a note about a whole scene sits at its start):
+  // jump to the next or previous one, from the selected note or else from the playhead.
+  nextNote(dir) {
+    const b = S.board;
+    if (!b?.scenes.length) return;
+    const list = b.notes
+      .filter(n => n.scene && (!n.resolved || n.id === S.sel.note))
+      .map(n => ({ n, t: n.at != null ? noteTime(b, n) : sceneRange(n.scene).start }))
+      .filter(x => x.t != null)
+      .sort((p, q) => p.t - q.t);
+    if (!list.length) return toast('No open notes on the timeline');
+    const i = list.findIndex(x => x.n.id === S.sel.note);
+    const eps = 0.5 / b.fps;
+    const pick = i >= 0 ? list[i + dir] : dir > 0 ? list.find(x => x.t > S.t + eps) : list.findLast(x => x.t < S.t - eps);
+    if (!pick) return toast(dir > 0 ? 'That was the last note' : 'That was the first note');
+    if (S.playing) pause();
+    S.tab = 'notes';
+    select(pick.n.scene, { note: pick.n.id, keepTime: true });
+    seek(pick.t);
   },
 
   step(frames) {

@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Storyboard</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='7' width='11' height='8' rx='2' fill='%23ecebe8'/%3E%3Crect x='18' y='7' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='3' y='18' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='18' y='18' width='11' height='8' rx='2' fill='%23ff5b35'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='7' width='11' height='8' rx='2' fill='%23ecebe8'/%3E%3Crect x='18' y='7' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='3' y='18' width='11' height='8' rx='2' fill='%23ecebe8' opacity='.55'/%3E%3Crect x='18' y='18' width='11' height='8' rx='2' fill='%23ff7a1a'/%3E%3C/svg%3E">
+  <link rel="manifest" href="/web/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/web/icon-touch.png">
+  <meta name="theme-color" content="#0b0b0d">
   <meta name="sb-build" content="%BUILD%">
   <meta name="sb-root" content="%ROOT%">
   <link rel="stylesheet" href="/web/style.css?v=%BUILD%">
@@ -34,6 +37,7 @@
       <button data-view="board" title="Board view (G)">Board</button>
     </div>
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" data-icon="keyboard"></button>
+    <button class="icon-btn" id="fullBtn" title="Full screen: the editor fills the screen, like an app" data-icon="expand"></button>
   </header>
 
   <main class="workspace" id="workspace">
@@ -47,14 +51,15 @@
           <div class="layer end-layer" id="endLayer"></div>
           <div class="frame-chip" id="frameChip"></div>
           <div class="pins" id="pins"></div>
-          <div class="pin-hint" id="pinHint">Click where on the frame · Esc to cancel</div>
         </div>
       </div>
       <div class="caption" id="caption"></div>
       <div class="transport">
         <div class="tc-wrap">
-          <span class="tc" id="tc">00:00:00</span>
-          <span class="tc-total" id="tcTotal">/ 00:00:00</span>
+          <span class="tc" id="tc" title="Click to type a time: 2115 is 00:00:21:15, +12 is twelve frames on">00:00:00:00</span>
+          <input class="tc-input" id="tcInput" hidden spellcheck="false" autocomplete="off" aria-label="Go to timecode">
+          <span class="tc-rate" id="tcRate" hidden></span>
+          <span class="tc-total" id="tcTotal">/ 00:00:00:00</span>
           <span class="tc-beat" id="tcBeat"></span>
         </div>
         <div class="transport-mid">
@@ -62,7 +67,7 @@
           <button class="icon-btn" id="tPrev" title="Previous cut (↑)" data-icon="prev"></button>
           <button class="play-btn" id="tPlay" title="Play (Space)" data-icon="play"></button>
           <button class="icon-btn" id="tNext" title="Next cut (↓)" data-icon="next"></button>
-          <button class="icon-btn toggle" id="tLoop" title="Loop the selected scene (L)" data-icon="loop"></button>
+          <button class="icon-btn toggle" id="tLoop" title="Loop the selected scene (⇧L)" data-icon="loop"></button>
         </div>
         <div class="transport-right">
           <button class="icon-btn toggle" id="tMute" title="Mute (M)" data-icon="volume"></button>
@@ -79,7 +84,7 @@
         <div class="cb-field">
           <textarea id="cbText" rows="1" placeholder="Message Claude…" spellcheck="true"></textarea>
           <button class="cb-clip" id="cbClip" title="Attach a file: a reference still, clip or PDF (or drop or paste one)" data-icon="clip"></button>
-          <button class="cb-spot" id="cbSpot" title="Mark a spot on the frame (P)" data-icon="pin"></button>
+          <button class="cb-spot" id="cbMark" title="Mark up this frame: boxes, brush strokes, arrows and points, each with its own words (A)" data-icon="markup"></button>
         </div>
         <button class="cb-add" id="cbSend" title="Add this note (Enter). Claude gets nothing until you send.">Add<span class="k">⏎</span></button>
         <button class="cb-sendall" id="cbSendAll" hidden title="Hand all your unsent notes to Claude (⌘Enter)"></button>

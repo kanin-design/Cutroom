@@ -10,6 +10,7 @@ import { seek } from './player.js';
 import { STATUS_COLOR, sceneColor } from './viewer.js';
 import { actions } from './actions.js';
 import { wire, chips, takeFiles, pendingFiles, fileRow } from './attach.js';
+import { openAnnotator, ink } from './annotate.js';
 
 const panel = $('#panel'), tabs = $('#tabs'), notesCount = $('#notesCount');
 const drafts = new Map();
@@ -191,7 +192,7 @@ function scenePanel() {
       h('div.dur-row', dur, h('span.unit', 's'), h('div.facts', h('span', `${Math.round(s.duration * b.fps)}f`), beats != null && h('span', `${beats} beats`))),
       h('span.label', 'Colour'),
       h('div.swatches',
-        h('button.none', { class: !s.color ? 'on' : '', title: 'Default', style: { '--c': 'var(--faint)' }, onclick: () => s.color && set({ color: null }) }),
+        h('button.none', { class: !s.color ? 'on' : '', title: 'Automatic: a colour unlike the scenes beside it', style: { '--c': 'var(--faint)' }, onclick: () => s.color && set({ color: null }) }),
         COLORS.slice(1).map(c => h('button', { class: s.color === c ? 'on' : '', style: { '--c': c }, onclick: () => s.color !== c && set({ color: c }) })),
       ),
     ),
@@ -310,17 +311,12 @@ function boardPanel() {
       h('div.sec-head', h('span.label', 'Project folder')),
       bound('board:project', b.project, (v, k) => set({ project: v }, k), { cls: 'num', placeholder: '/Users/…/dev/my-film — where the code that renders it lives' }),
     ),
-    h('div.sec.board-form',
-      h('div.sec-head', h('span.label', 'Format')),
-      h('div.three', numField('width', b.width), h('span.hint', '×'), numField('height', b.height)),
-      h('div.two',
-        h('label', h('span.hint', 'Frames per second'), numField('fps', b.fps)),
-        h('label', h('span.hint', 'Tempo (bpm)'), numField('bpm', b.bpm, { placeholder: 'none' })),
-      ),
-      b.bpm && h('div.two',
-        h('label', h('span.hint', 'Beats per bar'), numField('beatsPerBar', b.beatsPerBar)),
-        h('label', h('span.hint', 'First beat at (s)'), numField('beatOffset', b.beatOffset)),
-      ),
+    h('div.sec.props.wide',
+      h('span.label', 'Size'), h('div.dur-row', numField('width', b.width), h('span.unit', '×'), numField('height', b.height)),
+      h('span.label', 'Frame rate'), h('div.dur-row', numField('fps', b.fps), h('span.unit', 'fps')),
+      h('span.label', 'Tempo'), h('div.dur-row', numField('bpm', b.bpm, { placeholder: 'none' }), h('span.unit', 'bpm')),
+      b.bpm && [h('span.label', 'Meter'), h('div.dur-row', numField('beatsPerBar', b.beatsPerBar), h('span.unit', 'beats a bar'))],
+      b.bpm && [h('span.label', 'First beat'), h('div.dur-row', numField('beatOffset', b.beatOffset), h('span.unit', 's'))],
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Soundtrack')),
@@ -333,7 +329,7 @@ function boardPanel() {
     b.markers.length > 0 && h('div.sec',
       h('div.sec-head', h('span.label', 'Markers')),
       b.markers.map(m => h('div.row',
-        h('span.chip', { onclick: () => seek(m.t) }, short(m.t)),
+        h('span.chip', { onclick: () => seek(m.t) }, tcOf(m.t)),
         bound(`marker:${m.id}`, m.label, (v, k) => v.trim() && commit([{ op: 'marker.set', id: m.id, fields: { label: v } }], { key: k }), { cls: 'bare' }),
         h('button.icon-btn', { title: 'Delete marker', html: icons.x, onclick: () => commit([{ op: 'marker.remove', id: m.id }]) }),
       )),
@@ -362,9 +358,9 @@ function scopePill(n) {
   if (!n.scene) return h('span.scope.is-board', 'Whole board');
   if (!s) return h('span.scope.is-board', 'Deleted scene');
   if (n.at == null) return h('span.scope.is-scene', { title: 'Go to the scene', onclick: () => { select(s.id, { note: n.id, keepTime: true }); seek(sceneRange(s.id).start); } }, 'Whole scene');
-  return h('span.scope.is-frame', { title: 'Go to this exact frame', onclick: () => { select(s.id, { note: n.id, keepTime: true }); seek(t); } },
+  return h('span.scope.is-frame', { title: `Go to this exact frame (f${Math.round(t * b.fps)})`, onclick: () => { select(s.id, { note: n.id, keepTime: true }); seek(t); } },
     h('span', { html: icons.pin, style: { display: 'inline-grid' } }),
-    `Frame ${tcOf(t)}`, h('em', `f${Math.round(t * b.fps)}`), n.pin && h('em', '· spot'));
+    `Frame ${tcOf(t)}`, n.pin && h('em', '· spot'));
 }
 const tcOf = t => tcFmt(t, S.board.fps);
 
@@ -419,6 +415,7 @@ function noteCard(n) {
       h('span.note-status', { class: `s-${st.key}`, title: st.tip }, st.label),
     ),
     n.text && longText(n.id, h('div.note-text', n.text), n.text),
+    n.markup && markupBlock(n),
     fileRow(n.files),
     n.replies.length > 0 && h('div.replies', n.replies.map((r, i) => h('div.reply', whoEl(r.author), r.text && longText(`${n.id}.${i}`, h('div.reply-text', r.text), r.text), fileRow(r.files)))),
     h('div.note-foot',
@@ -428,6 +425,18 @@ function noteCard(n) {
       !draft && h('button.link', { class: n.resolved ? 'reopen' : 'done', onclick: () => commit([{ op: 'note.set', id: n.id, fields: { resolved: !n.resolved } }]) }, n.resolved ? 'Reopen' : 'Mark done'),
     ),
     selected && !draft && !n.resolved && h('div.reply-box', draftBox(`reply:${n.id}`, 'Reply…', (text, files) => commit([{ op: 'reply.add', note: n.id, reply: { text, ...(files.length ? { files } : {}) } }]), { label: 'Reply' })),
+  );
+}
+
+// A marked-up frame: the picture with the marks, and each mark's words by number. Click to open it.
+function markupBlock(n) {
+  const open = e => { e.stopPropagation(); openAnnotator({ note: n.id }); };
+  const editable = n.author === 'you' && !n.sent;
+  return h('div.note-marks',
+    n.markup.image && h('button.nm-pic', { title: editable ? 'Open the marks to change them' : 'Open the marks', onclick: open }, h('img', { src: mediaUrl(n.markup.image), alt: '', loading: 'lazy' })),
+    h('ol.nm-list', n.markup.marks.map(m => h('li', { onclick: open },
+      h('span.mk-n', { style: { '--mc': m.color, color: ink(m.color) } }, String(m.n)),
+      h('span', m.text || h('em', `${m.kind === 'rect' ? 'a box' : m.kind === 'stroke' ? 'a stroke' : m.kind === 'arrow' ? 'an arrow' : 'a point'}, no words`))))),
   );
 }
 

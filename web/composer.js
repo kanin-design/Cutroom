@@ -1,22 +1,22 @@
 // The message bar under the monitor: the way the user talks to the agent about the film. It always
 // says what a message is about: the scene under the playhead (or another one, or the whole board),
-// and, with Frame on, the exact frame. A spot marked on the monitor (P) opens a small card right
-// there instead, for a note about that point of that frame.
+// and, with Frame on, the exact frame. To show something on the frame itself, the markup button (A)
+// opens the frame large in the annotator.
 
 import { S, on, emit, here, commit, select, scene } from './store.js';
 import { layout, snapFrame } from '/lib/ops.js';
-import { $, h, tc, menu, closeMenu, toast, clamp } from './util.js';
+import { $, h, tc, menu, closeMenu, toast } from './util.js';
 import { icons } from './icons.js';
 import { pause } from './player.js';
-import { sceneColor, setPinning } from './viewer.js';
+import { sceneColor } from './viewer.js';
 import { wire, chips, takeFiles, pendingFiles } from './attach.js';
+import { openAnnotator } from './annotate.js';
 
 const bar = $('#composerBar'), sceneBtn = $('#cbScene'), frameBtn = $('#cbFrame'), tcEl = $('#cbTc');
-const text = $('#cbText'), spotBtn = $('#cbSpot'), sendBtn = $('#cbSend'), sendAllBtn = $('#cbSendAll'), filesEl = $('#cbFiles');
+const text = $('#cbText'), markBtn = $('#cbMark'), sendBtn = $('#cbSend'), sendAllBtn = $('#cbSendAll'), filesEl = $('#cbFiles');
 
 // target: 'here' (the scene under the playhead) or 'board'
 S.noteTarget = 'here';
-S.draftPin = null;
 try { S.noteFrame = localStorage.getItem('sb.noteFrame') === '1'; } catch { S.noteFrame = false; }
 
 const target = () => (S.noteTarget === 'board' || !S.board?.scenes.length ? null : here());
@@ -46,7 +46,6 @@ function render() {
   frameBtn.classList.toggle('on', frameOn);
   const f = Math.round(S.t * S.board.fps);
   tcEl.textContent = `${tc(S.t, S.board.fps)} · f${f}`;
-  spotBtn.classList.toggle('on', S.pinning || !!S.draftPin);
   text.placeholder = !hit
     ? 'Add a note about the whole board…'
     : frameOn
@@ -67,100 +66,12 @@ function fit() {
 export function setFrame(v) {
   S.noteFrame = v;
   try { localStorage.setItem('sb.noteFrame', v ? '1' : '0'); } catch {}
-  if (!v) setPinning(false);
   render();
 }
 
 export function focusComposer() {
   if (S.playing) pause();
   text.focus();
-}
-
-// ---------------------------------------------------------------- a note on the frame itself
-// A spot marked on the monitor opens a card beside it. The note is about the frame on screen when
-// the spot was marked, at that point; the card says which, and stays with it.
-const frameEl = $('#frame');
-let card = null;
-
-function closeCard() {
-  takeFiles('card');
-  card?.el.remove();
-  card = null;
-  S.draftPin = null;
-  emit('draft-pin');
-  render();
-}
-
-on('spot', p => {
-  const hit = S.board?.scenes.length ? here() : null;
-  if (!hit) return;
-  closeCard();
-  const b = S.board;
-  const at = snapFrame(b, hit.local);
-  const t = hit.start + at;
-  S.draftPin = p;
-  emit('draft-pin');
-  const ta = h('textarea', { rows: 2, placeholder: 'What about this spot?', spellcheck: true });
-  // Text already typed in the bar comes along.
-  if (text.value.trim()) { ta.value = text.value; text.value = ''; fit(); }
-  const addBtn = h('button.fn-add', { onclick: () => addFromCard(false) }, 'Add', h('span.k', '⏎'));
-  const clipBtn = h('button.fn-clip', { title: 'Attach a file (or drop or paste one)', html: icons.clip });
-  const cardFiles = h('div.fn-files');
-  const el = h('div.fnote', { onpointerdown: e => e.stopPropagation(), onclick: e => e.stopPropagation(), ondblclick: e => e.stopPropagation() },
-    h('div.fn-head', h('span', { html: icons.pin, style: { display: 'inline-grid' } }), h('b', `Frame ${tc(t, b.fps)}`), h('span.mono', `f${Math.round(t * b.fps)}`), h('span.fn-scene', `${String(hit.index + 1).padStart(2, '0')} ${hit.scene.title}`),
-      h('button.fn-close', { title: 'Cancel (Esc)', html: icons.x, onclick: closeCard })),
-    ta,
-    cardFiles,
-    h('div.fn-foot', clipBtn, h('span.fn-hint', '⌘⏎ adds it and sends your notes'), addBtn),
-  );
-  const sync = () => {
-    addBtn.disabled = !ta.value.trim() && !pendingFiles('card').length;
-    cardFiles.replaceChildren(...[chips('card', sync)].filter(Boolean));
-    place();
-  };
-  wire('card', { button: clipBtn, zone: el, field: ta, onchange: sync });
-  ta.addEventListener('input', () => { sync(); ta.style.height = 'auto'; ta.style.height = Math.min(160, ta.scrollHeight) + 'px'; });
-  ta.addEventListener('keydown', e => {
-    e.stopPropagation();
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addFromCard(true); }
-    else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); addFromCard(false); }
-    else if (e.key === 'Escape') { e.preventDefault(); closeCard(); }
-  });
-  frameEl.append(el);
-  card = { el, ta, scene: hit.scene.id, at, pin: p, sync };
-  sync();
-  place();
-  if (S.playing) pause();
-  ta.focus();
-});
-
-// Beside the spot, flipped to stay inside the frame.
-function place() {
-  if (!card) return;
-  const W = frameEl.clientWidth, H = frameEl.clientHeight;
-  const w = Math.min(340, W - 20);
-  card.el.style.width = w + 'px';
-  const px = card.pin.x * W, py = card.pin.y * H;
-  const left = px + 22 + w <= W - 10 ? px + 22 : Math.max(10, px - 22 - w);
-  const ch = card.el.offsetHeight;
-  card.el.style.left = left + 'px';
-  card.el.style.top = clamp(py - 28, 10, Math.max(10, H - ch - 10)) + 'px';
-}
-new ResizeObserver(place).observe(frameEl);
-
-async function addFromCard(send) {
-  if (!card) return;
-  const body = card.ta.value.trim();
-  if (body || pendingFiles('card').length) {
-    const files = await takeFiles('card');
-    const j = await commit([{ op: 'note.add', note: { scene: card.scene, at: card.at, pin: card.pin, text: body, ...(files.length ? { files } : {}) } }]);
-    if (!j) return;
-    S.sel = { scene: card.scene, note: j.ops[0].note.id };
-    emit('select');
-  } else if (!send) return card.ta.focus();
-  closeCard();
-  if (send) return sendAll();
-  toast(`Note added · ${unsentNotes().length} waiting to send`);
 }
 
 const unsentNotes = () => (S.board ? S.board.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved) : []);
@@ -240,7 +151,7 @@ text.addEventListener('keydown', e => {
   e.stopPropagation();
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); sendAll(); return; }
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); add(); }
-  if (e.key === 'Escape') { e.preventDefault(); setPinning(false); text.blur(); }
+  if (e.key === 'Escape') { e.preventDefault(); text.blur(); }
 });
 sendBtn.addEventListener('click', add);
 
@@ -252,11 +163,16 @@ function showFiles() {
 wire('bar', { button: $('#cbClip'), zone: bar, field: text, onchange: showFiles });
 sendAllBtn.addEventListener('click', sendAll);
 frameBtn.addEventListener('click', () => setFrame(!S.noteFrame));
-spotBtn.addEventListener('click', () => {
-  if (card) return closeCard();
-  if (S.playing) pause();
-  setPinning(!S.pinning);
-});
+// Mark up this frame: words already typed in the bar go along as the note's text.
+export function annotateHere() {
+  const words = text.value.trim();
+  text.value = '';
+  fit();
+  render();
+  openAnnotator({ text: words });
+}
+markBtn.addEventListener('click', annotateHere);
+on('send-notes', () => sendAll());
 
 sceneBtn.addEventListener('click', e => {
   const r = e.currentTarget.getBoundingClientRect();
@@ -282,8 +198,6 @@ sceneBtn.addEventListener('click', e => {
 on('time', render);
 on('board', render);
 on('select', render);
-on('pinning', render);
 on('presence', render);
-on('open', () => { S.noteTarget = 'here'; closeCard(); text.value = ''; fit(); render(); });
-on('board', () => card?.sync());
+on('open', () => { S.noteTarget = 'here'; text.value = ''; fit(); render(); });
 render();

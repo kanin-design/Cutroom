@@ -106,9 +106,10 @@ function requestDraw() {
   requestAnimationFrame(() => { drawQueued = false; draw(); });
 }
 
+// Ruler steps in whole frames below a second, so every label is an exact timecode.
 function niceStep(minSec, fps) {
-  const steps = [1 / fps, 2 / fps, 5 / fps, 10 / fps, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-  return steps.find(s => s >= minSec) || 600;
+  const frames = [1, 2, 5, 10, Math.round(fps / 2)].map(n => n / fps).filter(s => s < 1);
+  return [...frames, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600].find(s => s >= minSec) || 600;
 }
 
 function draw() {
@@ -163,16 +164,17 @@ function draw() {
       }
     }
   } else {
-    const major = niceStep(80 / S.pps, b.fps);
-    const minor = major / (major >= 1 ? 5 : major * b.fps >= 5 ? 5 : 2);
-    for (let t = Math.max(0, Math.floor(t0 / minor) * minor); t <= t1; t += minor) {
+    const major = niceStep(100 / S.pps, b.fps);
+    const per = major >= 1 || Math.round(major * b.fps) >= 5 ? 5 : 2;
+    const minor = major / per;
+    for (let i = Math.max(0, Math.floor(t0 / minor)); i * minor <= t1; i++) {
+      const t = i * minor;
       const x = Math.round(X(t)) + 0.5;
-      const isMajor = Math.abs(t / major - Math.round(t / major)) < 1e-6;
-      if (isMajor) {
+      if (i % per === 0) {
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.fillRect(x - 0.5, 10, 1, Y.ruler - 10);
         ctx.fillStyle = 'rgba(236,235,232,0.7)';
-        ctx.fillText(major < 1 ? `${Math.floor(t)}:${String(Math.round((t % 1) * b.fps)).padStart(2, '0')}f` : short(t).replace(/\.00s$/, 's'), x + 4, 6);
+        ctx.fillText(tc(t, b.fps), x + 4, 6);
         gridLine(x, 0.05);
       } else {
         ctx.fillStyle = 'rgba(255,255,255,0.13)';
@@ -188,11 +190,11 @@ function draw() {
     ctx.fillRect(Math.max(0, endX), Y.ruler, W, H - Y.ruler);
   }
 
-  // waveform
+  // waveform, in the audio clip's teal
   if (b.audio && peaks) {
     const mid = Y.audio + Y.hAudio / 2, amp = Y.hAudio / 2 - 3;
     const rate = peaks.rate;
-    ctx.fillStyle = 'rgba(255,255,255,0.02)';
+    ctx.fillStyle = 'rgba(52,150,120,0.13)';
     ctx.fillRect(X(0), Y.audio, X(b.audio.duration) - X(0), Y.hAudio);
     for (let x = Math.max(0, Math.floor(X(0))); x < Math.min(W, X(b.audio.duration)); x++) {
       const a = Math.floor(tOf(x + sl) * rate), z = Math.max(a + 1, Math.floor(tOf(x + 1 + sl) * rate));
@@ -202,9 +204,9 @@ function draw() {
         if (peaks.rms[i] > r) r = peaks.rms[i];
       }
       const ph = Math.max(0.5, (p / 255) * amp), rh = Math.max(0.5, (r / 255) * amp * 1.25);
-      ctx.fillStyle = 'rgba(143,179,255,0.28)';
+      ctx.fillStyle = 'rgba(72,196,160,0.3)';
       ctx.fillRect(x, mid - ph, 1, ph * 2);
-      ctx.fillStyle = 'rgba(160,190,255,0.62)';
+      ctx.fillStyle = 'rgba(120,222,186,0.7)';
       ctx.fillRect(x, mid - Math.min(rh, ph), 1, Math.min(rh, ph) * 2);
     }
   }
@@ -263,8 +265,8 @@ function renderClips() {
       }
       el.append(strip, h('div.shade'));
     }
-    if (s.color) el.append(h('div.cbar'));
-    el.append(h('div.cur'));
+    el.append(h('div.cbar'));
+    el.append(h('div.cur'), h('div.ring'));
     if (say?.scene === s.id) {
       el.classList.add('working');
       el.title += `\n${b.owner || 'Claude'}: ${say.text}${say.progress != null ? ` · ${Math.round(say.progress * 100)}%` : ''}`;
@@ -316,7 +318,7 @@ function renderNotes() {
     } else {
       const t = noteTime(b, n);
       const x = xOf(t);
-      items.push({ n, kind: 'frame', t, x, x0: x - 9, min: 40, want: Math.min(300, 52 + (n.text || n.files?.[0]?.name || '').length * 6.4 + (n.files ? 16 : 0)) });
+      items.push({ n, kind: 'frame', t, x, x0: x - 9, min: 40, want: Math.min(300, 52 + (n.text || n.markup?.marks[0]?.text || n.files?.[0]?.name || '').length * 6.4 + (n.files || n.markup ? 16 : 0)) });
     }
   }
   items.sort((p, q) => p.x0 - q.x0 || (p.kind === 'scene' ? -1 : 1));
@@ -350,7 +352,7 @@ function renderNotes() {
     const n = it.n;
     const st = noteState(n);
     const top = it.row * ROW_H + 3;
-    const cls = `${it.kind} ${st} ${n.pin ? 'spot' : ''} ${S.sel.note === n.id ? 'sel' : ''}`;
+    const cls = `${it.kind} ${st} ${n.pin ? 'spot' : ''} ${n.markup ? 'marked' : ''} ${S.sel.note === n.id ? 'sel' : ''}`;
     const tip = `#${num(n)} ${n.author === 'you' ? 'You' : n.author}${it.kind === 'frame' ? ` · frame ${tc(it.t, b.fps)}${n.pin ? ' · spot' : ''}` : ' · the whole scene'} · ${noteStatus(n).label}\n${n.text}`;
     if (it.kind === 'frame') {
       const h0 = Y.notes - Y.scenes + top + 10;
@@ -366,7 +368,8 @@ function renderNotes() {
       it.kind === 'frame' && h('i.ndot'),
       h('b', `#${num(n)}`),
       n.files && h('span.nclip', { html: icons.clip, title: `${n.files.length} file${n.files.length > 1 ? 's' : ''} attached` }),
-      h('span.ntxt', n.text.replace(/\s+/g, ' ') || n.files?.map(f => f.name).join(', ') || ''),
+      n.markup && h('span.nmarks', { html: icons.markup, title: `${n.markup.marks.length} mark${n.markup.marks.length === 1 ? '' : 's'} on the frame` }),
+      h('span.ntxt', n.text.replace(/\s+/g, ' ') || n.markup?.marks.map(m => m.text).filter(Boolean).join(' · ') || n.files?.map(f => f.name).join(', ') || ''),
       st === 'replied' && h('span.nflag', { html: icons.reply, title: 'Claude replied' }),
       st === 'read' && h('span.nflag.read', { html: icons.check, title: 'Claude has read it' }),
       st === 'working' && h('span.nflag.working', { title: 'Claude is working on it' }),
@@ -398,7 +401,7 @@ function renderMarkers() {
     return h('div.marker', {
     class: room < 22 ? 'flag-only' : '',
     style: { left: xOf(m.t) + 'px', '--mc': m.color || '#cfa25a', maxWidth: room === Infinity ? null : Math.max(2, room) + 'px' },
-    title: `${m.label} · ${short(m.t)} — right-click to edit`,
+    title: `${m.label} · ${tc(m.t, S.board.fps)} — right-click to edit`,
     onpointerdown: e => e.stopPropagation(),
     onclick: () => seek(m.t),
     oncontextmenu: e => {
@@ -719,7 +722,7 @@ scroll.addEventListener('contextmenu', e => {
     ].filter(Boolean));
   } else if (e.clientY - scroll.getBoundingClientRect().top < Y.ruler + 4) {
     menu(e.clientX, e.clientY, [
-      { label: `Add marker at ${short(snapFrame(S.board, t))}`, icon: 'flag', onclick: async () => {
+      { label: `Add marker at ${tc(snapFrame(S.board, t), S.board.fps)}`, icon: 'flag', onclick: async () => {
         const label = await ask(e.clientX, e.clientY, { placeholder: 'Marker label (drop, hit, VO…)', ok: 'Add' });
         if (label) commit([{ op: 'marker.add', marker: { t: snapFrame(S.board, Math.max(0, t)), label } }]);
       } },

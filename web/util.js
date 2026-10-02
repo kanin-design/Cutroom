@@ -29,13 +29,28 @@ export function h(sel, attrs, ...kids) {
 
 export const icon = name => h('span', { html: icons[name] || '', style: { display: 'inline-grid' } });
 
-// 00:11:15 (minutes:seconds:frames)
-export function tc(t, fps) {
-  const f = Math.round(Math.max(0, t) * fps);
-  const fr = f % Math.round(fps);
-  const s = Math.floor(f / fps);
-  const p = n => String(n).padStart(2, '0');
-  return `${p(Math.floor(s / 60))}:${p(s % 60)}:${p(fr)}`;
+// 00:01:11:15, as editors write it (hours:minutes:seconds:frames)
+export { timecode as tc } from '/lib/ops.js';
+
+// A time typed into the timecode, read the way editors do: digits fill from the right, so 2115 and
+// 21:15 are 00:00:21:15 and 5 is five frames; a leading + or - moves from `now` instead.
+// Returns seconds, or null if it isn't a time.
+export function parseTc(text, fps, now = 0) {
+  const m = /^\s*([+-]?)\s*([\d:;.\s]+)$/.exec(text);
+  if (!m) return null;
+  const body = m[2].trim();
+  let parts;
+  if (/[:;.]/.test(body)) parts = body.split(/\s*[:;.]\s*/);
+  else {
+    const d = body.replace(/\s+/g, '');
+    if (!d || d.length > 8) return null;
+    const p = d.padStart(8, '0');
+    parts = [p.slice(0, 2), p.slice(2, 4), p.slice(4, 6), p.slice(6)];
+  }
+  if (parts.length > 4 || parts.some(x => !/^\d*$/.test(x))) return null;
+  const [ff = 0, ss = 0, mm = 0, hh = 0] = parts.reverse().map(x => +x || 0);
+  const t = (((hh * 60 + mm) * 60 + ss) * Math.round(fps) + ff) / fps;
+  return m[1] === '+' ? now + t : m[1] === '-' ? now - t : t;
 }
 export const secs = t => `${+(+t).toFixed(t < 10 ? 2 : 1)}s`;
 export const short = t => {

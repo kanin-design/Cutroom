@@ -2,7 +2,7 @@
 // batches the server hands back (on the POST response and over SSE) strictly in rev order.
 // Local round trips are a few milliseconds, so there is no optimistic state to reconcile.
 
-import { applyOps, locate, totalDuration, findScene } from '/lib/ops.js';
+import { applyOps, locate, totalDuration, findScene, sceneColors, COLORS } from '/lib/ops.js';
 import { toast } from './util.js';
 
 export const S = {
@@ -11,9 +11,9 @@ export const S = {
   sel: { scene: null, note: null },
   t: 0,
   playing: false,
+  rate: 1, // playback speed: J/K/L shuttle runs it at 2, 4, 8, or backwards
   loop: false,
   muted: false,
-  pinning: false,
   view: 'edit',
   tab: 'scene',
   pps: 60,
@@ -41,6 +41,13 @@ export const activeSay = () => {
   const s = S.presence.say;
   return s && Date.now() - s.at < 30 * 60_000 ? s : null;
 };
+// A scene's colour (its own, or the one the editor gives it), worked out once per change.
+let colors = { rev: -1, slug: null, map: new Map() };
+export function sceneColor(s) {
+  const b = S.board;
+  if (b && (colors.rev !== b.rev || colors.slug !== S.slug)) colors = { rev: b.rev, slug: S.slug, map: sceneColors(b) };
+  return colors.map.get(s.id) || s.color || COLORS[0];
+}
 export const mediaUrl = rel => `/media/${encodeURIComponent(S.slug)}/${rel.replace(/^media\//, '')}`;
 
 export function select(sceneId, { note = null, keepTime = false } = {}) {

@@ -16,18 +16,24 @@ There is nothing to install: Node 22 and ffmpeg are all it needs.
 
 - **Monitor.** Plays the cut, with the soundtrack as the master clock. Scenes with a render play that
   clip or show that still. Scenes without one show a storyboard card with their title, picture and
-  sound. Double-click the monitor to play or pause.
+  sound. The timecode reads hours:minutes:seconds:frames; click it to type a time (2115 is
+  00:00:21:15, +12 is twelve frames on). J K L play backwards, stop and play forwards (press again for
+  2×, 4×, 8×). ⇧F plays it full screen.
 - **Timeline.**
   - Scenes sit end to end. Drag one to reorder it.
   - Drag a scene's right edge to change its length. With snapping on, the length lands on the beat
     grid, or on cuts and markers. Alt-drag an edge to roll the cut between two scenes instead.
-  - Pinch or ⌘-scroll to zoom. The ruler counts bars when the board has a tempo.
+  - Pinch or ⌘-scroll to zoom. The ruler counts bars when the board has a tempo, or timecode.
+  - Each scene has a colour line on top: its own colour, or one the editor picks so neighbours differ.
   - The Notes lane shows every note in time. The Audio lane shows the soundtrack's waveform.
   - Right-click the ruler to add a marker.
 - **Notes to Claude.** Write in the bar under the monitor (press C).
   - It always shows what the note is about: the scene you're in (click to pick another, or the whole
     board). Turn on **Frame** (F) for the exact frame you're on.
-  - Press P, or the pin, and click the picture to write about one spot of the frame, in a card beside it.
+  - **Mark up a frame** (double-click the picture, A, or the markup button): the frame opens large over the editor, zoomable. Draw
+    boxes, brush strokes, arrows and points; each mark is numbered and asks what it's about ("this area is
+    empty, looks bad"). ← → step frames. It saves as one note; Claude gets every mark with its exact place
+    and the frame with the marks drawn on it. Marks show on the monitor on their frame; click to reopen.
   - Attach references: the paperclip, a drop, or ⌘V a screenshot. Stills and clips show as thumbnails.
   - Enter adds a note as a draft. Claude sees nothing until you press **Send to Claude** (⌘⏎); sending
     means it can start work (without re-rendering, unless a note asks for that).
@@ -35,6 +41,7 @@ There is nothing to install: Node 22 and ffmpeg are all it needs.
   - Open notes sit on the timeline with their words: a frame note at its frame (a pin shape when it
     marks a spot), a scene note across its scene. A pin shows on the picture only on its own frame.
   - The Notes panel groups notes by scene, in the order of the cut; picking one takes you to it.
+    ⇧↑ ⇧↓ jump from note to note.
 - **Versions.** Every still, clip or sketch on a scene is kept, oldest to newest; click one to make it
   the one that plays. Drop a file onto a scene, the monitor or the Versions list to add one, onto empty
   timeline for a new scene, or onto the Audio lane for the soundtrack.
@@ -46,6 +53,9 @@ There is nothing to install: Node 22 and ffmpeg are all it needs.
   revert will do first, and ⌘Z undoes the revert.
 - **Boards.** The switcher lists boards newest first, with their owner, a dot when an agent is
   listening, and how many notes wait on you. Archive old boards to hide them (nothing is deleted).
+- **Full screen.** The button at the top right puts the whole editor on the screen, like an app. In
+  Chrome, Esc stays with the editor there: hold Esc, or click the button, to leave. For its own window
+  and Dock icon, install it: Chrome's install button in the address bar, or Safari's File → Add to Dock.
 
 Press `?` in the editor for every shortcut.
 

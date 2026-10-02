@@ -2,12 +2,14 @@
 // (holding its last frame if the scene runs longer), a still sits still, and a scene with no
 // render yet shows its storyboard card. Notes pinned on the frame float on top.
 
-import { S, on, emit, here, total, mediaUrl, commit, select, upload, sceneRange } from './store.js';
+import { S, on, emit, here, total, mediaUrl, commit, select, upload, sceneRange, sceneColor } from './store.js';
 import { RUNNER } from '/lib/sketch-runtime.js';
 import { activeRender, layout, noteTime, kindName, sketchCanvas, STATUSES, COLORS } from '/lib/ops.js';
-import { $, h, tc, clamp, ask, toast, secs } from './util.js';
+import { $, h, tc, parseTc, clamp, ask, toast, secs } from './util.js';
 import { icons } from './icons.js';
-import { toggle, seek, end } from './player.js';
+import { toggle, seek, end, pause } from './player.js';
+import { marksOverlay } from './annotate.js';
+import { inCinema } from './screen.js';
 
 const frame = $('#frame'), viewer = $('#viewer');
 const cardLayer = $('#cardLayer'), still = $('#still'), videos = $('#videos'), endLayer = $('#endLayer'), codeFrame = $('#codeFrame');
@@ -16,7 +18,7 @@ const cache = new Map(); // render file -> <video>
 let shown = { key: null, video: null };
 
 export const STATUS_COLOR = { idea: 'var(--st-idea)', draft: 'var(--st-draft)', review: 'var(--st-review)', approved: 'var(--st-approved)' };
-export const sceneColor = s => s.color || COLORS[0];
+export { sceneColor };
 
 // A short label for a version: its length for clips, otherwise what it is.
 export const versionLabel = r =>
@@ -109,7 +111,8 @@ export function cardNode(s, index) {
 function fit() {
   if (!S.board) return;
   const r = viewer.getBoundingClientRect();
-  const aw = r.width - 56, ah = r.height - 32;
+  const m = inCinema() ? 0 : 1; // full-screen playback: the picture runs to the edges
+  const aw = r.width - 56 * m, ah = r.height - 32 * m;
   const ar = S.board.width / S.board.height;
   let w = aw, hh = aw / ar;
   if (hh > ah) { hh = ah; w = ah * ar; }
@@ -117,6 +120,8 @@ function fit() {
   frame.style.height = Math.max(24, Math.floor(hh)) + 'px';
 }
 new ResizeObserver(fit).observe(viewer);
+// Marks on the frame are placed in its pixels: redraw them when it changes size.
+new ResizeObserver(() => renderPins()).observe(frame);
 
 // ---------------------------------------------------------------- picture
 
@@ -208,19 +213,22 @@ function syncVideo(v, local, r) {
   const d = v.duration || r.duration || 0;
   const target = d ? Math.min(local, d - 0.5 / S.board.fps) : local;
   v.wantTime = target;
-  if (S.playing) {
+  const rate = S.rate;
+  if (S.playing && rate > 0) {
     if (local >= d - 0.02) {
       if (!v.paused) v.pause();
     } else if (v.paused) {
       v.currentTime = target;
+      v.playbackRate = rate;
       v.play().catch(() => {});
     } else {
       // Big drift: jump. Small drift: lean on the playback rate until picture meets the clock.
       const drift = v.currentTime - target;
-      if (Math.abs(drift) > 0.25) v.currentTime = target;
-      v.playbackRate = Math.abs(drift) < 0.012 ? 1 : clamp(1 - drift * 2.5, 0.8, 1.2);
+      if (Math.abs(drift) > 0.25 * rate) v.currentTime = target;
+      v.playbackRate = Math.abs(drift) < 0.012 * rate ? rate : clamp(rate - drift * 2.5, rate * 0.8, rate * 1.2);
     }
   } else {
+    // Paused, or shuttling backwards (video can't play in reverse): show the frame at the clock.
     v.playbackRate = 1;
     if (!v.paused) v.pause();
     if (!v.seeking && Math.abs(v.currentTime - target) > 0.25 / S.board.fps) v.currentTime = target;
@@ -234,9 +242,9 @@ function preloadNext(i) {
 }
 
 // ---------------------------------------------------------------- notes on the frame
-// A spot marked on a frame shows as a pin on that frame only, while paused: step or play past it and
-// it's gone. The timeline marker and the Notes list both bring you back to it. The spot being
-// written about shows as a dashed pin.
+// A note's spot (a pin) or marks show on its own frame only, while paused: step or play past it and
+// they're gone. The timeline marker and the Notes list both bring you back. Click the marks to open
+// them in the annotator.
 
 let pinsKey = '';
 
@@ -252,10 +260,12 @@ function renderPins() {
   if (!hit) { pinsKey = ''; return pinsEl.replaceChildren(); } // a board with no scenes yet
   const sid = hit.scene.id;
   const b = S.board;
-  const frame = Math.round(hit.local * b.fps);
-  const onFrame = n => n.at != null && Math.round(n.at * b.fps) === frame;
-  const pinned = S.playing ? [] : b.notes.filter(n => n.pin && n.scene === sid && onFrame(n) && (!n.resolved || S.sel.note === n.id));
-  const key = `${sid}|${pinned.map(n => n.id).join(',')}|${S.sel.note}|${b.rev}|${S.draftPin ? S.draftPin.x + ',' + S.draftPin.y : ''}|${S.playing}`;
+  const here_ = Math.round(hit.local * b.fps); // the frame number under the playhead
+  const onFrame = n => n.at != null && Math.round(n.at * b.fps) === here_;
+  const visible = n => n.scene === sid && onFrame(n) && (!n.resolved || S.sel.note === n.id);
+  const pinned = S.playing ? [] : b.notes.filter(n => n.pin && visible(n));
+  const marked = S.playing ? [] : b.notes.filter(n => n.markup?.marks.length && visible(n));
+  const key = `${sid}|${pinned.map(n => n.id).join(',')}|${marked.map(n => n.id).join(',')}|${S.sel.note}|${b.rev}|${S.playing}|${frame.clientWidth}x${frame.clientHeight}`;
   if (key === pinsKey) return;
   pinsKey = key;
   const num = n => String(b.notes.indexOf(n) + 1);
@@ -266,25 +276,14 @@ function renderPins() {
     onpointerdown: e => e.stopPropagation(),
     onclick: e => { e.stopPropagation(); openNote(n); },
   }, h('div.dot', num(n))));
-  if (S.draftPin) pins.push(h('div.pin.draft', { style: { left: S.draftPin.x * 100 + '%', top: S.draftPin.y * 100 + '%' }, title: 'The spot your message will point at' }, h('div.dot', '+')));
+  for (const n of marked) pins.push(marksOverlay(n, frame.clientWidth, frame.clientHeight));
   pinsEl.replaceChildren(...pins);
 }
 
-export function setPinning(v) {
-  S.pinning = v;
-  frame.classList.toggle('pinning', v);
-  emit('pinning');
-}
-
-// Marking a spot: the click goes to the message bar, which then writes a note about this frame, here.
-frame.addEventListener('click', e => {
-  if (!S.pinning || !S.board?.scenes.length) return;
-  const rect = frame.getBoundingClientRect();
-  const x = clamp((e.clientX - rect.left) / rect.width, 0, 1), y = clamp((e.clientY - rect.top) / rect.height, 0, 1);
-  setPinning(false);
-  emit('spot', { x: +x.toFixed(4), y: +y.toFixed(4) });
-});
-frame.addEventListener('dblclick', () => { if (!S.pinning) toggle(); });
+// Double-click the picture to mark up that frame (full screen too). Watching full screen, a click
+// plays or pauses.
+viewer.addEventListener('dblclick', e => { if (!e.target.closest('.pins')) emit('annotate'); });
+viewer.addEventListener('click', () => { if (inCinema()) toggle(); });
 
 // Drop a file on the monitor: a new version of the scene on screen.
 frame.addEventListener('dragover', e => { if (S.board?.scenes.length) { e.preventDefault(); frame.classList.add('drop-target'); } });
@@ -299,7 +298,39 @@ frame.addEventListener('drop', e => {
 
 // ---------------------------------------------------------------- transport
 
-const tcEl = $('#tc'), tcTotal = $('#tcTotal'), tcBeat = $('#tcBeat'), playBtn = $('#tPlay');
+const tcEl = $('#tc'), tcInput = $('#tcInput'), tcRate = $('#tcRate'), tcTotal = $('#tcTotal'), tcBeat = $('#tcBeat'), playBtn = $('#tPlay');
+
+// Click the timecode to type where to go: 2115 (or 21:15) is 00:00:21:15, +12 is twelve frames on.
+tcEl.addEventListener('click', () => {
+  if (!S.board) return;
+  if (S.playing) pause();
+  tcInput.value = tc(S.t, S.board.fps);
+  tcEl.hidden = true;
+  tcInput.hidden = false;
+  tcInput.focus();
+  tcInput.select();
+});
+tcInput.addEventListener('keydown', e => {
+  e.stopPropagation();
+  if (e.key === 'Escape') { e.preventDefault(); tcInput.blur(); }
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const t = parseTc(tcInput.value, S.board.fps, S.t);
+  if (t == null) {
+    tcInput.classList.remove('bad');
+    void tcInput.offsetWidth;
+    return tcInput.classList.add('bad');
+  }
+  seek(Math.round(t * S.board.fps) / S.board.fps);
+  tcInput.blur();
+});
+tcInput.addEventListener('blur', () => { tcInput.hidden = true; tcInput.classList.remove('bad'); tcEl.hidden = false; });
+
+// The shuttle speed beside the timecode, while it isn't plain playback.
+on('rate', () => {
+  tcRate.hidden = !S.playing || S.rate === 1;
+  tcRate.textContent = S.rate < 0 ? `◀ ${-S.rate}×` : `${S.rate}×`;
+});
 
 function transport() {
   if (!S.board) return;

@@ -1,16 +1,16 @@
 // Boot, top bar, board switching, keyboard and the bits of chrome that tie the panels together.
 
 import { S, on, emit, openBoard, undo, redo, select, commit, scene, activeSay, sceneRange } from './store.js';
-import { $, h, menu, closeMenu, modal, toast, typing, clamp, short, ago } from './util.js';
+import { $, h, menu, closeMenu, modal, toast, typing, clamp, tc, ago } from './util.js';
 import { hydrateIcons, icons } from './icons.js';
-import { play, pause, toggle, seek, setMuted, end } from './player.js';
-import { setPinning } from './viewer.js';
+import { play, pause, toggle, seek, setMuted, end, shuttle } from './player.js';
+import { setCinema, inCinema } from './screen.js';
 import { fitAll, zoomBy } from './timeline.js';
 import { setView } from './grid.js';
 import { actions } from './actions.js';
 import { noteStatus } from './inspector.js';
 import { noteTime } from '/lib/ops.js';
-import { focusComposer, setFrame, sendAll } from './composer.js';
+import { focusComposer, setFrame, sendAll, annotateHere } from './composer.js';
 
 hydrateIcons();
 
@@ -24,7 +24,7 @@ on('board', () => {
   if (!b) return;
   boardTitle.textContent = b.title;
   document.title = `${b.title} · Storyboard`;
-  boardMeta.textContent = [`${b.width}×${b.height}`, `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, `${b.scenes.length} scene${b.scenes.length === 1 ? '' : 's'}`, short(end()), b.archived && 'archived'].filter(Boolean).join(' · ');
+  boardMeta.textContent = [`${b.width}×${b.height}`, `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, `${b.scenes.length} scene${b.scenes.length === 1 ? '' : 's'}`, tc(end(), b.fps), b.archived && 'archived'].filter(Boolean).join(' · ');
   $('#rulerSeg').hidden = !b.bpm;
   if (!b.bpm && S.ruler === 'bars') S.ruler = 'time';
 });
@@ -257,6 +257,8 @@ on('board', e => {
   }
 });
 
+on('annotate', () => annotateHere());
+
 // ---------------------------------------------------------------- updates
 // The server says which build of the editor it serves. If this tab is running an older one, offer
 // a reload, and do it by itself at the first idle moment, keeping the board, playhead and selection.
@@ -329,9 +331,10 @@ try {
 // ---------------------------------------------------------------- keyboard
 
 const KEYS = [
-  ['Space', 'Play / pause'], ['← →', 'Step one frame'], ['⇧ ← →', 'Step one second'], ['↑ ↓', 'Previous / next cut'],
-  ['Home End', 'Start / end'], ['L', 'Loop the selected scene'], ['M', 'Mute'], ['C', 'Add a note'], ['⌘⏎', 'Send your notes to Claude'],
-  ['F', 'Note about this exact frame (on/off)'], ['P', 'Mark a spot on the frame'],
+  ['Space', 'Play / pause'], ['J K L', 'Back, stop, forward (again for 2×, 4×, 8×)'], ['← →', 'Step one frame'], ['⇧ ← →', 'Step one second'],
+  ['↑ ↓', 'Previous / next cut'], ['⇧↑ ⇧↓', 'Previous / next note'], ['Home End', 'Start / end'], ['Click the timecode', 'Type a time: 2115, or +12 frames'],
+  ['⇧L', 'Loop the selected scene'], ['M', 'Mute'], ['⇧F', 'Full-screen playback'], ['C', 'Add a note'], ['⌘⏎', 'Send your notes to Claude'],
+  ['F', 'Note about this exact frame (on/off)'], ['A', 'Mark up this frame (or double-click the picture)'],
   ['N', 'New scene after the selection'], ['S', 'Split at the playhead'], ['⌘D', 'Duplicate scene'], ['⌫', 'Delete scene'],
   ['1 – 4', 'Status: idea, draft, review, approved'], ['[ ]', 'Select previous / next scene'], ['⌘Z  ⇧⌘Z', 'Undo / redo'], ['= −', 'Zoom in / out'],
   ['⇧Z', 'Fit timeline'], ['G', 'Edit / Board view'], ['Pinch · ⌘ scroll', 'Zoom the timeline'], ['Alt-drag an edge', 'Roll a cut'],
@@ -342,11 +345,15 @@ function showKeys() {
   modal([h('h2', 'Keyboard'), h('div.keys', KEYS.map(([k, v]) => h('div', h('span', v), h('kbd', k))))]);
 }
 
+// Watching full screen, only the playback keys work: nothing gets edited out of sight.
+const CINEMA_KEYS = new Set([' ', 'j', 'J', 'k', 'K', 'l', 'L', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'm', 'M', 'F', 'Escape']);
+
 addEventListener('keydown', e => {
   if (typing(e) || !S.board) return;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
   const hit = () => e.preventDefault();
+  if (inCinema() && (mod || !CINEMA_KEYS.has(k))) return;
   if (mod && k.toLowerCase() === 'z') { hit(); return e.shiftKey ? redo() : undo(); }
   if (mod && k.toLowerCase() === 'y') { hit(); return redo(); }
   if (mod && k.toLowerCase() === 'd') { hit(); return actions.duplicate(); }
@@ -354,17 +361,25 @@ addEventListener('keydown', e => {
   if (mod) return;
   switch (k) {
     case ' ': hit(); return toggle();
+    case 'j': case 'J': hit(); return shuttle(-1);
+    case 'k': case 'K': hit(); return S.playing && pause();
+    case 'l': case 'L':
+      hit();
+      if (!e.shiftKey) return shuttle(1);
+      S.loop = !S.loop;
+      return emit('loop');
     case 'ArrowLeft': hit(); return actions.step(e.shiftKey ? -S.board.fps : -1);
     case 'ArrowRight': hit(); return actions.step(e.shiftKey ? S.board.fps : 1);
-    case 'ArrowUp': hit(); return actions.nextCut(-1);
-    case 'ArrowDown': hit(); return actions.nextCut(1);
+    case 'ArrowUp': hit(); return e.shiftKey ? actions.nextNote(-1) : actions.nextCut(-1);
+    case 'ArrowDown': hit(); return e.shiftKey ? actions.nextNote(1) : actions.nextCut(1);
     case 'Home': hit(); return seek(0);
     case 'End': hit(); return seek(end());
-    case 'l': case 'L': S.loop = !S.loop; return emit('loop');
     case 'm': case 'M': return setMuted(!S.muted);
     case 'c': case 'C': hit(); return focusComposer();
-    case 'f': case 'F': return setFrame(!S.noteFrame);
-    case 'p': case 'P': if (S.playing) pause(); return setPinning(!S.pinning);
+    case 'f': case 'F':
+      if (e.shiftKey) { hit(); return setCinema(!inCinema()); }
+      return setFrame(!S.noteFrame);
+    case 'a': case 'A': case 'p': case 'P': hit(); return annotateHere();
     case 'n': case 'N': hit(); return actions.addScene();
     case 's': case 'S': return actions.split();
     case 'g': case 'G': return setView(S.view === 'edit' ? 'board' : 'edit');
@@ -385,7 +400,7 @@ addEventListener('keydown', e => {
       return;
     }
     case 'Escape':
-      if (S.pinning) return setPinning(false);
+      if (inCinema()) return setCinema(false);
       if (S.sel.scene || S.sel.note) { S.sel = { scene: null, note: null }; emit('select'); }
       return;
   }

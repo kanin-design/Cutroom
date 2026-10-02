@@ -1,0 +1,14 @@
+{
+  "name": "Storyboard",
+  "short_name": "Storyboard",
+  "description": "A storyboard you and Claude edit together.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b0d",
+  "theme_color": "#0b0b0d",
+  "icons": [
+    { "src": "/web/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/web/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

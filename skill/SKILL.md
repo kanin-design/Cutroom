@@ -1,6 +1,6 @@
 ---
 name: storyboard
-description: The user's local storyboard app for films, showreels and videos (shot lists, timing, sketches, renders, the user's notes on frames). Use when planning or reviewing a film with the user, or when they mention the storyboard or a board.
+description: The user's local storyboard app for films, showreels and videos (shot lists, timing, sketches, renders, the user's notes on frames). Use when planning, reviewing or delivering a film with the user (renders of a film that has a board go on the board), or when they mention the storyboard or a board.
 ---
 
 # Storyboard

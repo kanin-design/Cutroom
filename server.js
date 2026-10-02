@@ -15,7 +15,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import * as store from './lib/store.js';
 import { applyOps, findScene, defaultDuration, placement, activeRender, forYou } from './lib/ops.js';
 import { boardText } from './lib/text.js';
-import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment } from './lib/media.js';
+import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment, frameAt } from './lib/media.js';
 import { agentApi, makeSay } from './lib/agent.js';
 import { makeSketch, drawnStale, redrawCode } from './lib/sketch.js';
 import { watchSketches } from './lib/folder.js';
@@ -32,6 +32,7 @@ const MIME = {
   '.webp': 'image/webp', '.gif': 'image/gif', '.avif': 'image/avif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.m4v': 'video/mp4',
   '.wav': 'audio/wav', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
   '.mov': 'video/quicktime', '.pdf': 'application/pdf', '.txt': 'text/plain; charset=utf-8', '.md': 'text/plain; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
 };
 
 // ---------------------------------------------------------------- the editor's build
@@ -269,6 +270,21 @@ async function api(req, res, url, [a, slug, action]) {
   if (action === 'text') return send(res, 200, boardText(L.board, { slug, dir: store.dir(slug), notes: url.searchParams.get('notes') || 'open' }), 'text/plain; charset=utf-8');
   if (action === 'log') return send(res, 200, { entries: store.readLog(slug, { since: +url.searchParams.get('since') || 0, limit: +url.searchParams.get('limit') || 200 }) });
   if (action === 'events') return events(req, res, L, url);
+  if (action === 'frame' && req.method === 'GET') {
+    // One frame of a scene, as the server draws it for agents too (clips, stills and code sketches
+    // alike), up to w pixels wide: what the annotator opens on.
+    const out = path.join(os.tmpdir(), `sb-frame-${stamp()}.jpg`);
+    try {
+      const w = Math.min(3840, Math.max(320, +url.searchParams.get('w') || 1920));
+      const f = await frameAt(L.board, store.dir(slug), { scene: url.searchParams.get('scene'), at: url.searchParams.get('at') }, out, { width: w });
+      res.on('finish', () => fs.rm(out, { force: true }, () => {}));
+      res.setHeader('X-Frame-Label', encodeURIComponent(f.label));
+      return file(req, res, f.path);
+    } catch (e) {
+      fs.rm(out, { force: true }, () => {});
+      return send(res, e.status || 400, { error: e.message });
+    }
+  }
   if (action === 'animatic') {
     const scale = Math.min(1, Math.max(0.1, +url.searchParams.get('scale') || 0.5));
     const a = await exportAnimatic(L, store.dir(slug), { scale });

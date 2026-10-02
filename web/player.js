@@ -1,5 +1,6 @@
 // The clock. While playing, the soundtrack is the master clock when there is one (so picture
 // sits on the music); otherwise the wall clock is. Everything else follows S.t via 'time' events.
+// S.rate is the speed: 1 normally, and 2, 4, 8 or backwards while shuttling with J and L.
 
 import { S, on, emit, total, mediaUrl, sceneRange } from './store.js';
 import { clamp } from './util.js';
@@ -42,12 +43,16 @@ function range() {
 }
 
 const audioLive = () => audioSrc && S.board.audio && S.t < (S.board.audio.duration || 0) - 0.02;
+// The soundtrack plays along forwards up to 4×; faster, or backwards, it is silent.
+const audioRate = () => (S.rate > 0 && S.rate <= 4 ? S.rate : 0);
 
 function syncAudio() {
   if (!audioSrc) return;
   audio.muted = S.muted;
-  if (S.playing && audioLive() && !audioBlocked) {
-    if (Math.abs(audio.currentTime - S.t) > 0.03) audio.currentTime = S.t;
+  const r = audioRate();
+  if (S.playing && r && audioLive() && !audioBlocked) {
+    if (audio.playbackRate !== r) audio.playbackRate = r;
+    if (Math.abs(audio.currentTime - S.t) > 0.03 * r) audio.currentTime = S.t;
     if (audio.paused) audio.play().catch(() => { audioBlocked = true; });
   } else if (!audio.paused) audio.pause();
 }
@@ -66,7 +71,13 @@ export function seek(t) {
 export function play() {
   if (!S.board || end() <= 0) return;
   const [a, b] = range();
-  if (S.t >= b - 1 / S.board.fps || S.t < a) S.t = a;
+  if (S.rate < 0) {
+    // backwards from the start: round to the end when looping, otherwise there's nothing to play
+    if (S.t <= a + 0.5 / S.board.fps || S.t > b) {
+      if (!S.loop) { S.rate = 1; return emit('rate'); }
+      S.t = b;
+    }
+  } else if (S.t >= b - 1 / S.board.fps || S.t < a) S.t = a;
   S.playing = true;
   audioBlocked = false;
   wallStart = performance.now();
@@ -80,15 +91,33 @@ export function play() {
 
 export function pause() {
   S.playing = false;
+  S.rate = 1;
   audio.pause();
   cancelAnimationFrame(raf);
   document.body.classList.remove('playing');
   S.t = Math.round(S.t * S.board.fps) / S.board.fps;
   emit('play');
+  emit('rate');
   emit('time');
 }
 
 export const toggle = () => (S.playing ? pause() : play());
+
+// J and L: play backwards or forwards. Pressing the same one again doubles the speed (up to 8×);
+// the other one turns round at normal speed. K (or Space) stops.
+export function shuttle(dir) {
+  if (!S.board || end() <= 0) return;
+  if (!S.playing) {
+    S.rate = dir;
+    play();
+  } else {
+    S.rate = Math.sign(S.rate) === dir ? clamp(S.rate * 2, -8, 8) : dir;
+    wallStart = performance.now();
+    tStart = S.t;
+    syncAudio();
+  }
+  emit('rate');
+}
 
 export function setMuted(m) {
   S.muted = m;
@@ -100,25 +129,25 @@ function tick() {
   if (!S.playing) return;
   const now = performance.now();
   let t;
-  if (audioRunning && !audio.paused && audioLive()) {
+  if (audioRate() && audioRunning && !audio.paused && audioLive()) {
     t = audio.currentTime;
     wallStart = now;
     tStart = t;
-  } else t = tStart + (now - wallStart) / 1000;
+  } else t = tStart + ((now - wallStart) / 1000) * S.rate;
   const [a, b] = range();
-  if (t >= b) {
+  if (S.rate > 0 ? t >= b : t <= a) {
     if (S.loop) {
-      S.t = a;
+      S.t = S.rate > 0 ? a : b;
       wallStart = now;
-      tStart = a;
+      tStart = S.t;
       syncAudio();
     } else {
-      S.t = b;
+      S.t = S.rate > 0 ? b : a;
       return pause();
     }
   } else {
     S.t = t;
-    if (audioLive() && audio.paused && !audioBlocked) syncAudio();
+    if (audioRate() && audioLive() && audio.paused && !audioBlocked) syncAudio();
   }
   emit('time');
   raf = requestAnimationFrame(tick);

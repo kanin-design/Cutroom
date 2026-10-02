@@ -34,6 +34,9 @@ export function addFiles(key, files, onchange) {
   onchange?.();
 }
 
+// Any blob into the board's media/refs (the annotator saves its pictures this way).
+export const uploadFile = (blob, name) => upload(blob, name);
+
 async function upload(file, name) {
   const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/attach?name=${encodeURIComponent(name)}`, { method: 'POST', headers: { 'x-storyboard': '1' }, body: file });
   const j = await r.json();
