@@ -23,7 +23,7 @@ on('board', () => {
   const b = S.board;
   if (!b) return;
   boardTitle.textContent = b.title;
-  document.title = `${b.title} · Storyboard`;
+  document.title = `${b.title} · Cutroom`;
   boardMeta.textContent = [`${b.width}×${b.height}`, `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, `${b.scenes.length} scene${b.scenes.length === 1 ? '' : 's'}`, tc(end(), b.fps), b.archived && 'archived'].filter(Boolean).join(' · ');
   $('#rulerSeg').hidden = !b.bpm;
   if (!b.bpm && S.ruler === 'bars') S.ruler = 'time';

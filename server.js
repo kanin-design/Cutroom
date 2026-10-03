@@ -17,6 +17,7 @@ import { applyOps, findScene, defaultDuration, placement, activeRender, forYou }
 import { boardText } from './lib/text.js';
 import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment, frameAt } from './lib/media.js';
 import { agentApi, makeSay } from './lib/agent.js';
+import { chrome } from './lib/codesketch.js';
 import { makeSketch, drawnStale, redrawCode } from './lib/sketch.js';
 import { watchSketches } from './lib/folder.js';
 import { exportAnimatic } from './lib/animatic.js';
@@ -465,7 +466,10 @@ server.listen(PORT, HOST, () => {
   for (const b of store.list()) {
     try { open(b.slug); } catch (e) { console.warn(`[${b.slug}] couldn't open: ${e.message}`); }
   }
-  console.log(`storyboard → http://${HOST}:${PORT}`);
+  console.log(`Cutroom → http://${HOST}:${PORT}`);
   console.log(`agent API and manual → http://${HOST}:${PORT}/agent`);
   console.log(`boards in ${store.HOME}`);
+  // What the media features need, said once at the start rather than as an error later.
+  try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); } catch { console.warn('ffmpeg not found: clips, stills and soundtracks need it (brew install ffmpeg)'); }
+  if (!chrome()) console.warn('Google Chrome not found: code sketches play in the editor, but their posters and contact sheets need it (or set CHROME to a Chromium-based browser)');
 });

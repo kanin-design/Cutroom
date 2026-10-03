@@ -273,8 +273,12 @@ function paint() {
       A.labels[i] = el;
     }
     const [x, y] = anchor(m, P);
+    // Near the right edge a label opens to the left of its number, anchored by its right side so it
+    // keeps all the room there is.
+    const flip = x > A.stage.clientWidth - 280;
     el.dataset.i = i;
-    el.style.left = x + 'px';
+    el.style.left = flip ? 'auto' : x + 'px';
+    el.style.right = flip ? A.stage.clientWidth - x + 'px' : 'auto';
     el.style.top = y + 'px';
     el.style.setProperty('--mc', m.color);
     el.classList.toggle('sel', A.sel === i);
@@ -302,8 +306,7 @@ function paint() {
       t.textContent = m.text;
       t.hidden = !m.text;
     }
-    // keep labels inside the frame's stage: flip to the left near the right edge
-    el.classList.toggle('flip', x > A.stage.clientWidth - 280);
+    el.classList.toggle('flip', flip);
   });
   side();
 }
@@ -511,7 +514,8 @@ function onKey(e) {
   const mod = e.metaKey || e.ctrlKey;
   if (ae?.tagName === 'TEXTAREA' && A.el.contains(ae)) {
     if (e.key === 'Enter' && mod) { e.preventDefault(); ae.blur(); save(true); }
-    else if (e.key === 'Enter' && !e.shiftKey && ae.matches('.mk-edit')) { e.preventDefault(); ae.blur(); }
+    // Enter finishes the mark: it lets go of it too, so the next colour or tool is for the next mark
+    else if (e.key === 'Enter' && !e.shiftKey && ae.matches('.mk-edit')) { e.preventDefault(); ae.blur(); select(null); }
     else if (e.key === 'Escape') { e.preventDefault(); ae.blur(); }
     return;
   }

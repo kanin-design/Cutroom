@@ -324,7 +324,7 @@ function boardPanel() {
         ? h('div.row', h('span', { style: { flex: 1 } }, b.audio.name, h('span.hint', ` · ${secs(b.audio.duration)}`)),
             h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, 'Replace'),
             h('button.text-btn.danger', { onclick: () => commit([{ op: 'audio.set', audio: null }]) }, 'Remove'))
-        : h('div.row', h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, h('span', { html: icons.wave }), 'Add a soundtrack…'), h('span.hint', 'or drop one on the Audio lane')),
+        : h('div', h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, h('span', { html: icons.wave }), 'Add a soundtrack…'), h('div.hint', 'or drop one on the Audio lane')),
     ),
     b.markers.length > 0 && h('div.sec',
       h('div.sec-head', h('span.label', 'Markers')),

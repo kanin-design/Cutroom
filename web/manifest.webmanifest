@@ -1,7 +1,7 @@
 {
-  "name": "Storyboard",
-  "short_name": "Storyboard",
-  "description": "A storyboard you and Claude edit together.",
+  "name": "Cutroom",
+  "short_name": "Cutroom",
+  "description": "A storyboard you and Claude edit together, laid out like a video editor.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

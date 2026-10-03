@@ -631,7 +631,7 @@ pre.meta { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-r
   pointer-events: auto; cursor: move; max-width: 300px;
 }
 .read-only .mk-label { cursor: pointer; }
-.mk-label.flip { flex-direction: row-reverse; transform: translate(calc(-100% + 11px), -11px); }
+.mk-label.flip { flex-direction: row-reverse; transform: translate(11px, -11px); }
 .mk-label.sel .mk-n, .mk-label.hover .mk-n { box-shadow: 0 0 0 2px #fff, 0 2px 8px rgba(0, 0, 0, 0.5); }
 .mk-t, .mk-edit {
   font: 500 12.5px/1.4 var(--font); color: #f4f1ea; background: rgba(12, 12, 14, 0.86); border-left: 2.5px solid var(--mc);

@@ -1,8 +1,16 @@
 {
-  "name": "storyboard",
+  "name": "cutroom",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "A storyboard you and an agent edit together",
-  "bin": { "sb": "./sb" },
-  "scripts": { "start": "node server.js" }
+  "description": "Cutroom: a storyboard you and Claude edit together, laid out like a video editor",
+  "bin": {
+    "sb": "./sb"
+  },
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }
