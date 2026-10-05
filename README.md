@@ -1,9 +1,4 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="web/logo.svg">
-    <img src="docs/logo-ink.svg" alt="Cutroom" width="440">
-  </picture>
-</p>
+![Cutroom](docs/logo.png)
 
 <h3 align="center">Direct your films with Claude.</h3>
 
