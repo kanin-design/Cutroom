@@ -3,14 +3,13 @@
 // one frame note. Claude reads every mark (where it is, as fractions and pixels, and what you wrote)
 // and sees the frame with the marks drawn on it, made here from exactly what you saw.
 
-import { S, on, emit, here, commit, mediaUrl, sceneRange, sceneColor } from './store.js';
-import { snapFrame, findScene, activeRender } from '/lib/ops.js';
+import { S, on, emit, here, commit, mediaUrl, sceneRange, sceneColor, hold } from './store.js';
+import { snapFrame, findScene, activeRender, kindName, plural, MARK_COLORS } from '/lib/ops.js';
 import { h, tc, toast, clamp } from './util.js';
 import { icons } from './icons.js';
 import { pause, seek } from './player.js';
 import { uploadFile } from './attach.js';
 
-export const MARK_COLORS = ['#ff453a', '#ffd23f', '#4cc9f0', '#f4f1ea'];
 const TOOLS = [
   { id: 'rect', key: 'r', label: 'Box', icon: 'box' },
   { id: 'stroke', key: 'b', label: 'Brush', icon: 'brush' },
@@ -19,6 +18,7 @@ const TOOLS = [
 ];
 let tool = 'rect', color = MARK_COLORS[0]; // remembered from one opening to the next
 let A = null; // the open annotator
+hold(() => !!A); // marks being drawn or saved: the editor doesn't reload under them
 
 // ---------------------------------------------------------------- drawing marks (shared with the monitor)
 
@@ -32,7 +32,7 @@ const sv = (tag, attrs = {}) => {
 // Where a mark's number sits: just off the mark, so it covers none of it (outside a box's top-left
 // corner, behind an arrow's tail or a stroke's start, beside a point). P maps frame fractions to
 // [x, y]; k scales the gap (1 on screen, the picture's own scale in the composite).
-export function anchor(m, P, k = 1) {
+function anchor(m, P, k = 1) {
   if (m.kind === 'point') { const [x, y] = P(m.x, m.y); return [x + 16 * k, y - 16 * k]; }
   if (m.kind === 'rect') { const [x, y] = P(m.x, m.y); return [x - 12 * k, y - 12 * k]; }
   const [a, b] = m.kind === 'arrow' ? [[m.x1, m.y1], [m.x2, m.y2]] : [m.points[0], m.points[Math.min(m.points.length - 1, 4)]];
@@ -42,7 +42,7 @@ export function anchor(m, P, k = 1) {
 
 // One mark as SVG in screen space, over a dark halo so it reads on light, dark and same-coloured
 // frames alike. With hit, it also gets a wide invisible edge to grab it by.
-export function markShape(m, P, { i = null, sel = false, hit = false, hover = false } = {}) {
+function markShape(m, P, { i = null, sel = false, hit = false, hover = false } = {}) {
   const g = sv('g', { class: `mk${sel ? ' sel' : ''}${hover ? ' hover' : ''}`, 'data-i': i });
   const parts = [];
   const line = (attrs, w) => parts.push([attrs, w]);
@@ -97,7 +97,7 @@ export function marksOverlay(n, w, hgt) {
 
 // ---------------------------------------------------------------- opening
 
-// Opens on the frame under the playhead, or on a note's marks (to change them while it's a draft,
+// Opens on the frame under the playhead, or on a note's marks (to change them while it isn't sent,
 // otherwise to look). text: words already typed in the message bar come along as the note's text.
 export async function openAnnotator({ note = null, text = '' } = {}) {
   if (!S.board?.scenes.length) return toast('Add a scene first, then mark up its frames');
@@ -279,7 +279,7 @@ function paint() {
     el.dataset.i = i;
     el.style.left = flip ? 'auto' : x + 'px';
     el.style.right = flip ? A.stage.clientWidth - x + 'px' : 'auto';
-    el.style.top = y + 'px';
+    el.style.top = clamp(y, 12, A.stage.clientHeight - 14) + 'px'; // never cut off by the frame's edge
     el.style.setProperty('--mc', m.color);
     el.classList.toggle('sel', A.sel === i);
     el.classList.toggle('hover', A.hover === i);
@@ -652,7 +652,10 @@ async function save(send) {
     S.sel = { scene: S.sel.scene, note: id };
     emit('select');
     if (send) emit('send-notes');
-    else toast(`Note added with ${count} mark${count === 1 ? '' : 's'} · not sent yet`);
+    else {
+      const waiting = S.board.notes.filter(x => x.author === 'you' && !x.sent && !x.resolved).length;
+      toast(`Note added with ${plural(count, 'mark')} · ${waiting} waiting to send`);
+    }
   } catch (e) {
     if (A) { A.saving = false; side(); }
     if (e.message !== 'not saved') toast(`Couldn't save the marks: ${e.message}`, { err: true });
@@ -728,12 +731,18 @@ function head() {
   const b = S.board, s = findScene(b, A.scene), i = b.scenes.indexOf(s);
   const t = sceneRange(A.scene).start + A.at;
   A.where.replaceChildren(...[
-    h('span.anno-scene', { style: { '--c': sceneColor(s) } }, h('i'), h('span.n', String(i + 1).padStart(2, '0')), s.title),
+    h('span.anno-scene', { style: { '--c': sceneColor(s) }, title: s.title }, h('i'), h('span.n', String(i + 1).padStart(2, '0')), h('span.t', s.title)),
     !A.readOnly && h('button.icon-btn', { title: 'Previous frame (←)', html: icons.prev, onclick: () => step(-1) }),
     h('span.anno-tc', `Frame ${tc(t, b.fps)}`, h('em', ` f${Math.round(t * b.fps)}`)),
     !A.readOnly && h('button.icon-btn', { title: 'Next frame (→)', html: icons.next, onclick: () => step(1) }),
-    h('span.anno-ver', { title: A.render ? 'The version these marks are on' : 'This scene has no picture yet: its storyboard card' }, A.render || 'card'),
+    h('span.anno-ver', { title: A.render ? `The version these marks are on (${A.render})` : 'This scene has no picture yet: its storyboard card' }, versionName(s, A.render)),
   ].filter(x => x instanceof Node));
+}
+
+// The version marks are on, the way the user knows it: "clip · version 3 of 5", or the storyboard card.
+function versionName(s, id) {
+  const i = s.renders.findIndex(r => r.id === id);
+  return i < 0 ? 'storyboard card' : `${kindName(s.renders[i])} · version ${i + 1} of ${s.renders.length}`;
 }
 
 // The marks by number, the words for the whole frame, and saving.
@@ -744,27 +753,32 @@ function side() {
   const foot = A.readOnly
     ? h('div.anno-foot', h('span.anno-hint', 'Sent to Claude. Reply or resolve it in the Notes panel.'), h('button.text-btn.primary', { onclick: () => close(true) }, 'Close'))
     : A.discard
-      ? h('div.anno-foot.ask', h('span', `Discard ${A.marks.length ? `${A.marks.length} mark${A.marks.length === 1 ? '' : 's'}` : 'your changes'}?`),
+      ? h('div.anno-foot.ask', h('span', `Discard ${A.marks.length ? plural(A.marks.length, 'mark') : 'your changes'}?`),
           h('button.text-btn', { onclick: () => { A.discard = false; side(); } }, 'Keep editing'),
           h('button.text-btn.primary.danger-fill', { onclick: () => close(true) }, 'Discard'))
       : h('div.anno-foot',
           h('span.grow'),
-          h('button.anno-add', { disabled: A.saving || nothing, onclick: () => save(false), title: 'Add it as a note; Claude gets it when you send (⏎)' }, A.saving ? 'Saving…' : A.noteId ? 'Save' : 'Add note', h('span.k', '⏎')),
-          h('button.cb-sendall', { disabled: A.saving || nothing, onclick: () => save(true), title: 'Add it and send your notes to Claude (⌘⏎)' }, h('span', { html: icons.spark, style: { display: 'inline-grid' } }), `Send ${unsent} to Claude`));
+          h('button.anno-add', { disabled: A.saving || nothing, onclick: () => save(false), title: 'Add it to your notes, like Add in the message bar: it goes to Claude with the rest when you send (⏎)' }, A.saving ? 'Saving…' : A.noteId ? 'Save' : 'Add note', h('span.k', '⏎')),
+          h('button.cb-sendall', { disabled: A.saving || nothing, onclick: () => save(true), title: unsent > 1 ? `Send it to Claude now, with your ${plural(unsent - 1, 'other note')} not sent yet (⌘⏎)` : 'Send it to Claude now (⌘⏎)' },
+            h('span', { html: icons.spark, style: { display: 'inline-grid' } }), 'Send to Claude', unsent > 1 && h('span.with', `+${unsent - 1}`)));
   A.footEl.replaceChildren(foot);
   A.listEl.replaceChildren(
     h('div.anno-side-head', h('span.label', 'Marks', h('em', A.marks.length ? String(A.marks.length) : ''))),
     A.marks.length
       ? h('ol.anno-list', A.marks.map((m, i) => h('li', { class: `${A.sel === i ? 'sel' : ''} ${A.hover === i ? 'hover' : ''}`, 'data-i': i, onclick: () => (A.readOnly ? select(i) : edit(i)), onpointerenter: () => setHover(i), onpointerleave: () => setHover(null) },
           h('span.mk-n', { style: { '--mc': m.color, color: ink(m.color) } }, String(i + 1)),
+          h('span.mk-kind', { title: TOOLS.find(t => t.id === m.kind)?.label, html: icons[TOOLS.find(t => t.id === m.kind)?.icon] || '' }),
           h('span.what', m.text || h('em', A.readOnly ? 'no words' : 'Add a comment…')),
           !A.readOnly && h('button.icon-btn.rm', { title: 'Delete this mark (⌫)', html: icons.x, onclick: e => { e.stopPropagation(); removeMark(i); } }))))
       : A.readOnly
         ? h('div.anno-hint', 'No marks.')
         : h('div.anno-empty',
-            h('p', 'Drag on the frame to show what you mean. Each mark asks for its own words.'),
-            h('div.anno-keys', TOOLS.map(t => h('button', { class: tool === t.id ? 'on' : '', onclick: () => setTool(t.id) }, h('span', { html: icons[t.icon] }), t.label, h('kbd', t.key.toUpperCase())))),
-            h('p.anno-hint', '⇧ squares a box or straightens an arrow. Space-drag or scroll to move around, pinch to zoom, ← → to step frames.'),
+            h('p', 'Drag on the frame to show what you mean: a box, a brush stroke, an arrow or a point. Each mark gets its own words.'),
+            h('dl.anno-tips',
+              h('dt', ...TOOLS.map(t => h('kbd', t.key.toUpperCase()))), h('dd', 'box, brush, arrow, point'),
+              h('dt', h('kbd', '⇧')), h('dd', 'square a box, straighten an arrow'),
+              h('dt', h('kbd', 'Space')), h('dd', 'drag to move around; scroll or pinch to zoom'),
+              h('dt', h('kbd', '←'), h('kbd', '→')), h('dd', 'step one frame')),
           ),
   );
 }

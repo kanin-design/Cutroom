@@ -1,12 +1,11 @@
 // Board view: the classic storyboard wall. One panel per scene, in order, with its picture
 // and sound written underneath. Drag panels to reorder; drop a file on a panel to give it a render.
 
-import { S, on, commit, select, mediaUrl, upload } from './store.js';
-import { activeRender, layout } from '/lib/ops.js';
+import { S, on, emit, commit, select, mediaUrl, upload } from './store.js';
+import { activeRender, layout, forYou, plural } from '/lib/ops.js';
 import { $, h, secs } from './util.js';
 import { icons } from './icons.js';
-import { cardNode, STATUS_COLOR, versionLabel } from './viewer.js';
-import { actions } from './actions.js';
+import { cardNode, STATUS_COLOR, versionLabel, versionKind } from './viewer.js';
 
 const root = $('#gridView');
 let dragId = null;
@@ -18,6 +17,7 @@ function render() {
   const top = root.scrollTop;
   const cards = layout(b).map(({ scene: s, index }) => {
     const r = activeRender(s);
+    const notes = b.notes.filter(n => n.scene === s.id && !n.resolved), waiting = notes.some(forYou);
     const el = h('div.gcard', {
       class: S.sel.scene === s.id ? 'sel' : '', draggable: true, 'data-id': s.id,
       onclick: () => select(s.id),
@@ -25,13 +25,18 @@ function render() {
     },
       h('div.gframe', { style: { '--ar': ar } },
         r ? h('img', { src: mediaUrl(/\.svg$/i.test(r.file) ? r.file : r.poster || r.file), alt: '', loading: 'lazy' }) : cardNode(s, index),
-        r && h('span.k', versionLabel(r)),
+        r && versionLabel(r, s) && h('span.k', versionLabel(r, s)),
       ),
       h('div.gmeta',
         h('span.n', String(index + 1).padStart(2, '0')),
         h('span.t', s.title),
-        h('i.sdot', { style: { '--sc': STATUS_COLOR[s.status] }, title: s.status }),
         h('span.d', secs(s.duration)),
+      ),
+      // where the scene stands: its status, what plays (a sketch, or the quality it was rendered at), its open notes
+      h('div.gfacts',
+        h('span.gst', { style: { '--sc': STATUS_COLOR[s.status] } }, h('i'), s.status[0].toUpperCase() + s.status.slice(1)),
+        r && versionKind(r) && h('span', versionKind(r)),
+        notes.length > 0 && h('span', { class: waiting ? 'wait' : '', 'data-tip': waiting ? 'Claude answered: it’s waiting for you' : '' }, plural(notes.length, 'note')),
       ),
       s.picture && h('div.gtext', s.picture),
       s.sound && h('div.gsound', { html: icons.sound }, h('span', s.sound)),
@@ -76,12 +81,16 @@ function clearMarks() {
   for (const el of root.querySelectorAll('.drop-target')) el.classList.remove('drop-target');
 }
 
+// Edit is one scene at a time, with the picture and the timeline; Board is the whole film as a wall, which
+// gets the full height (the timeline is Edit's). Each has its own side pane (inspector.js).
 export function setView(v) {
   S.view = v;
   $('#stage').hidden = v !== 'edit';
   root.hidden = v !== 'board';
+  document.body.classList.toggle('view-board', v === 'board');
   for (const b of document.querySelectorAll('#viewSeg button')) b.classList.toggle('on', b.dataset.view === v);
   try { localStorage.setItem('sb.view', v); } catch {}
+  emit('view');
   render();
   if (v === 'board') {
     const el = root.querySelector('.gcard.sel');

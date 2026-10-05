@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Storyboard server: serves the editor, owns every open board in memory, applies ops from the
+// The Cutroom server: serves the editor, owns every open board in memory, applies ops from the
 // browser and from `sb`, writes board.json after each change, and streams changes to every
 // open page over Server-Sent Events. Edits made straight to board.json on disk are picked up too.
 //
@@ -13,7 +13,7 @@ import { pipeline } from 'node:stream/promises';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import * as store from './lib/store.js';
-import { applyOps, findScene, defaultDuration, placement, activeRender, forYou } from './lib/ops.js';
+import { applyOps, findScene, defaultDuration, placement, activeRender, forYou, noteState } from './lib/ops.js';
 import { boardText } from './lib/text.js';
 import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment, frameAt } from './lib/media.js';
 import { agentApi, makeSay } from './lib/agent.js';
@@ -21,7 +21,7 @@ import { chrome } from './lib/codesketch.js';
 import { makeSketch, drawnStale, redrawCode } from './lib/sketch.js';
 import { watchSketches } from './lib/folder.js';
 import { exportAnimatic } from './lib/animatic.js';
-import { overview, boardRows } from './lib/manual.js';
+import { overview, boardRows, handoff } from './lib/manual.js';
 
 const argPort = process.argv.indexOf('--port');
 const PORT = Number(argPort > 0 ? process.argv[argPort + 1] : process.env.SB_PORT || 8840);
@@ -104,7 +104,15 @@ fs.watch(path.join(store.ROOT, 'server.js'), () => { clearTimeout(buildTimer); b
 
 // ---------------------------------------------------------------- live boards
 
-const live = new Map(); // slug -> { slug, board, written, clients:Set, say, lastAgentAt, watcher }
+const live = new Map(); // slug -> { slug, board, written, clients:Set, waiters:Set, say, lastAgentAt, watcher, … }
+
+// When an agent last did something on a board, from its log: after a restart, a session that was
+// working a minute ago still counts as working.
+const AUTHORS_NOT_AGENTS = ['you', 'storyboard', 'sketches folder'];
+function lastAgentEntry(slug) {
+  const e = store.readLog(slug, { limit: 200 }).findLast(x => !AUTHORS_NOT_AGENTS.includes(x.author));
+  return e ? Date.parse(e.created) || 0 : 0;
+}
 
 function open(slug) {
   let L = live.get(slug);
@@ -116,7 +124,12 @@ function open(slug) {
   }
   if (L) return L;
   const board = store.read(slug);
-  L = { slug, board, written: fs.readFileSync(store.file(slug), 'utf8'), clients: new Set(), waiters: new Set(), say: null, lastAgentAt: 0 };
+  L = {
+    slug, board, written: fs.readFileSync(store.file(slug), 'utf8'), clients: new Set(), waiters: new Set(), say: null, lastAgentAt: lastAgentEntry(slug),
+    handed: false, // a wait handed the session notes, and it hasn't started waiting again: it's on them
+    answering: 0, // a wait handed it a ping alone: until then it counts as listening, while it answers
+    ping: { seq: 0, delivered: 0, at: 0, heard: 0 }, // the user looking for the session's window
+  };
   let t;
   L.watcher = fs.watch(store.dir(slug), (_, name) => {
     if (name !== 'board.json') return;
@@ -211,9 +224,17 @@ function broadcast(L, msg) {
   }
 }
 
+// Whether a Claude session has the board: watching (waiting for notes right now, or answering a ping
+// until answeringUntil, as good as waiting), or busy until busyUntil (it was handed notes, or has one
+// marked working, and hasn't come back to wait: it's working on them, as long as it was heard from in the
+// last half hour). Notes sent while it's busy reach it the moment it waits again.
+const BUSY_FOR = 30 * 60_000;
 function presence(L) {
   const watching = [...L.clients].filter(c => c.role === 'agent').length + L.waiters.size;
-  return { type: 'presence', watching, say: L.say, lastAgentAt: L.lastAgentAt };
+  const working = L.handed || L.board.notes.some(n => noteState(n) === 'working');
+  const busyUntil = !watching && working ? L.lastAgentAt + BUSY_FOR : 0;
+  const ping = L.ping.at ? { at: L.ping.at, heard: L.ping.heard >= L.ping.at ? L.ping.heard : 0 } : null;
+  return { type: 'presence', watching, answeringUntil: L.answering, busyUntil, say: L.say, lastAgentAt: L.lastAgentAt, ping };
 }
 
 // ---------------------------------------------------------------- http
@@ -251,11 +272,13 @@ async function api(req, res, url, [a, slug, action]) {
 
   if (!slug) {
     if (req.method === 'GET') {
-      // For the switcher: who owns each board, whether an agent is listening, and what waits on you.
+      // For the switcher: who owns each board, whether an agent is listening, what waits on you, and the
+      // notes you wrote there but haven't sent.
       const boards = store.list().map(x => {
         const b = live.get(x.slug)?.board || store.read(x.slug);
         const L = live.get(x.slug);
-        return { ...x, listening: L ? presence(L).watching : 0, forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length };
+        const p = L ? presence(L) : null;
+        return { ...x, listening: p ? p.watching || +(p.answeringUntil > Date.now()) : 0, busy: !!p && p.busyUntil > Date.now(), forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length, unsent: b.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved).length };
       });
       return send(res, 200, { boards });
     }
@@ -268,6 +291,8 @@ async function api(req, res, url, [a, slug, action]) {
 
   const L = open(slug);
   if (!action && req.method === 'GET') return send(res, 200, { slug, board: L.board });
+  // The message that hands this board to a Claude session (?sent=… when notes were just sent to nobody).
+  if (action === 'handoff') return send(res, 200, { text: handoff(L.board, { base: `http://${req.headers.host}`, slug, root: store.ROOT, sent: url.searchParams.get('sent') }) });
   if (action === 'text') return send(res, 200, boardText(L.board, { slug, dir: store.dir(slug), notes: url.searchParams.get('notes') || 'open' }), 'text/plain; charset=utf-8');
   if (action === 'log') return send(res, 200, { entries: store.readLog(slug, { since: +url.searchParams.get('since') || 0, limit: +url.searchParams.get('limit') || 200 }) });
   if (action === 'events') return events(req, res, L, url);
@@ -307,10 +332,19 @@ async function api(req, res, url, [a, slug, action]) {
     broadcast(L, presence(L));
     return send(res, 200, { ok: true });
   }
+  // Ping: the user is looking for the session's window. A session waiting for notes hears it now; a busy
+  // one, the moment it waits again. It answers in its own window.
+  if (action === 'ping') {
+    L.ping.seq++;
+    L.ping.at = Date.now();
+    for (const w of [...L.waiters]) w({ ping: true });
+    broadcast(L, presence(L));
+    return send(res, 200, { ok: true, heardNow: L.ping.delivered === L.ping.seq });
+  }
   if (action === 'ingest') return ingest(req, res, L, url);
   if (action === 'attach') return attach(req, res, L, url);
   if (action === 'delete') {
-    if (req.headers['x-storyboard'] !== '1') return send(res, 403, { error: 'missing x-storyboard header' });
+    if (!fromEditor(req, res)) return;
     return send(res, 200, deleteBoard(L));
   }
   if (action === 'revert') {
@@ -333,16 +367,14 @@ async function api(req, res, url, [a, slug, action]) {
 
 // A file dropped on the page: store it, then attach it where it was dropped.
 async function ingest(req, res, L, url) {
-  if (req.headers['x-storyboard'] !== '1') return send(res, 403, { error: 'missing x-storyboard header' });
+  if (!fromEditor(req, res)) return;
   const name = path.basename(url.searchParams.get('name') || 'upload');
   const kind = mediaKind(name);
   if (!kind) return send(res, 400, { error: `can't use ${name} (not a still, clip or audio file)` });
-  const tmp = path.join(os.tmpdir(), `sb-${stamp()}-${name}`);
-  await pipeline(req, fs.createWriteStream(tmp));
-  try {
+  return withUpload(req, name, async tmp => {
     const dir = store.dir(L.slug);
     const q = k => url.searchParams.get(k);
-    const stem = `${stamp()}`;
+    const stem = stamp();
     if (q('as') === 'audio' || kind === 'audio') {
       const audio = await ingestAudio(dir, tmp, { base: stem });
       audio.name = name;
@@ -356,25 +388,40 @@ async function ingest(req, res, L, url) {
     const scene = q('scene');
     if (scene && findScene(L.board, scene)) return send(res, 200, commit(L, [{ op: 'render.add', scene, render: r }]));
     const title = name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
-    const duration = r.kind === 'video' ? r.duration : defaultDuration(L.board);
+    const duration = r.kind === 'video' || r.kind === 'code' ? r.duration : defaultDuration(L.board);
     const pos = q('before') ? { before: q('before') } : q('after') ? { after: q('after') } : {};
-    return send(res, 200, commit(L, [{ op: 'scene.add', scene: { title, duration: r.kind === 'code' ? r.duration : duration, status: r.sketch ? 'idea' : 'draft', renders: [r] }, ...pos }]));
-  } finally {
-    fs.rm(tmp, { force: true }, () => {});
-  }
+    return send(res, 200, commit(L, [{ op: 'scene.add', scene: { title, duration, status: r.sketch ? 'idea' : 'draft', renders: [r] }, ...pos }]));
+  });
 }
 
 // A file for a note or reply: saved into the board's media/refs, described back to the page, which
 // puts it on the note it then adds.
 async function attach(req, res, L, url) {
-  if (req.headers['x-storyboard'] !== '1') return send(res, 403, { error: 'missing x-storyboard header' });
+  if (!fromEditor(req, res)) return;
   const name = path.basename(url.searchParams.get('name') || 'file');
+  return withUpload(req, name, async tmp => {
+    try {
+      return send(res, 200, { file: await saveAttachment(store.dir(L.slug), tmp, name) });
+    } catch (e) {
+      return send(res, e.status || 500, { error: e.message });
+    }
+  });
+}
+
+// Uploads and deletes come with this header instead of a JSON body. Like JSON, a custom header
+// forces a CORS preflight, so only the editor's own page can send them.
+function fromEditor(req, res) {
+  if (req.headers['x-storyboard'] === '1') return true;
+  send(res, 403, { error: 'missing x-storyboard header' });
+  return false;
+}
+
+// The request body in a temporary file named like the upload, for `use`; removed afterwards.
+async function withUpload(req, name, use) {
   const tmp = path.join(os.tmpdir(), `sb-${stamp()}-${name}`);
   await pipeline(req, fs.createWriteStream(tmp));
   try {
-    return send(res, 200, { file: await saveAttachment(store.dir(L.slug), tmp, name) });
-  } catch (e) {
-    return send(res, e.status || 500, { error: e.message });
+    return await use(tmp);
   } finally {
     fs.rm(tmp, { force: true }, () => {});
   }
@@ -433,7 +480,7 @@ function file(req, res, p) {
   const headers = { 'Content-Type': type, 'Accept-Ranges': 'bytes', ...(type === 'image/svg+xml' ? { 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; img-src data:" } : {}), 'Cache-Control': p.includes(`${path.sep}media${path.sep}`) ? 'max-age=31536000, immutable' : 'no-cache' };
   const range = /bytes=(\d*)-(\d*)/.exec(req.headers.range || '');
   if (range) {
-    const start = range[1] ? +range[1] : st.size - +range[2];
+    const start = range[1] ? +range[1] : Math.max(0, st.size - +range[2]);
     const end = range[1] && range[2] ? Math.min(+range[2], st.size - 1) : st.size - 1;
     if (start > end || start >= st.size) return res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end();
     res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });

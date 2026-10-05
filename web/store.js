@@ -33,7 +33,6 @@ export const on = (evt, fn) => { if (!bus.has(evt)) bus.set(evt, new Set()); bus
 export const emit = (evt, data) => { for (const fn of bus.get(evt) || []) fn(data); };
 
 export const scene = id => (S.board ? findScene(S.board, id) : null);
-export const selScene = () => scene(S.sel.scene);
 export const here = () => (S.board ? locate(S.board, S.t) : null);
 export const total = () => (S.board ? totalDuration(S.board) : 0);
 // The agent's status line while it's fresh (the editor stops showing it after 30 minutes).
@@ -74,7 +73,7 @@ export const sceneRange = layoutOf;
 
 // ---------------------------------------------------------------- sync
 
-export const clientId = Math.random().toString(36).slice(2, 10);
+const clientId = Math.random().toString(36).slice(2, 10);
 let es = null;
 const pending = new Map();
 let gapTimer = null;
@@ -170,17 +169,31 @@ function touched(ops) {
   return ids;
 }
 
+// Work an editor reload would lose: writes on their way to the server, and whatever the panels hold
+// (a frame being marked up, words typed but not added). A reload for a new editor waits for none.
+let writing = 0;
+const holds = new Set();
+export const hold = holding => holds.add(holding);
+export const holding = () => writing > 0 || [...holds].some(f => f());
+async function write(request) {
+  writing++;
+  try { return await request(); } finally { writing--; }
+}
+
 // Send ops. `key` merges consecutive edits of one field into a single undo step.
 export async function commit(ops, { key = null, undoable = true, quiet = false } = {}) {
   let j;
   try {
-    const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/ops`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ops, author: 'you', client: clientId }),
+    j = await write(async () => {
+      const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/ops`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ops, author: 'you', client: clientId }),
+      });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error || r.statusText);
+      return body;
     });
-    j = await r.json();
-    if (!r.ok) throw new Error(j.error || r.statusText);
   } catch (e) {
     if (!quiet) toast(e.message, { err: true });
     emit('board', { failed: true });
@@ -222,9 +235,12 @@ export async function upload(file, target = {}) {
   if (target.audio) q.set('as', 'audio');
   const t = toast(`Preparing ${file.name}…`, { spin: true });
   try {
-    const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/ingest?${q}`, { method: 'POST', headers: { 'x-storyboard': '1' }, body: file });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error);
+    const j = await write(async () => {
+      const r = await fetch(`/api/boards/${encodeURIComponent(S.slug)}/ingest?${q}`, { method: 'POST', headers: { 'x-storyboard': '1' }, body: file });
+      const body = await r.json();
+      if (!r.ok) throw new Error(body.error);
+      return body;
+    });
     receive(j);
     S.undo.push({ ops: j.inverse });
     S.redo.length = 0;

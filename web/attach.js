@@ -2,11 +2,12 @@
 // clip"). A file is picked, dropped or pasted, uploaded at once, and shown as a chip until the note
 // is added. Pending files live here by key, so they survive the panels re-rendering.
 
-import { S, mediaUrl } from './store.js';
+import { S, mediaUrl, hold } from './store.js';
 import { h, toast, modal } from './util.js';
 import { icons } from './icons.js';
 
 const pending = new Map(); // key -> [{ name, promise, file? }]
+hold(() => [...pending.values()].some(list => list.length > 0)); // files on a note not added yet
 
 export const pendingFiles = key => pending.get(key) || [];
 
@@ -18,7 +19,7 @@ export async function takeFiles(key) {
   return done.filter(Boolean);
 }
 
-export function addFiles(key, files, onchange) {
+function addFiles(key, files, onchange) {
   const list = pending.get(key) || [];
   for (const f of files) {
     const item = { name: f.name || 'pasted image.png', file: null };

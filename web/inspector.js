@@ -1,19 +1,24 @@
-// The right-hand panel: the selected scene (or the board when nothing is selected), every
-// note thread, and the activity feed. It re-renders on every change; typing survives because
-// every field has a key, drafts live in `drafts`, and focus and caret are put back afterwards.
+// The right-hand panel. Its first tab belongs to the view: in Edit, the scene (the one selected, or
+// else the one under the playhead); in Board, the film (how it renders, where it stands, Claude, the
+// brief and treatment, its settings). Then every note thread, and the activity feed. It re-renders
+// on every change; typing survives because every field has a key, drafts live in `drafts`, and
+// focus and caret are put back afterwards.
 
-import { S, on, emit, commit, select, scene, mediaUrl, sceneRange, upload, here, activeSay } from './store.js';
-import { STATUSES, COLORS, activeRender, layout, noteTime, findScene } from '/lib/ops.js';
-import { $, h, secs, short, ago, debounce, autosize, toast, menu, closeMenu, ask, tc as tcFmt } from './util.js';
+import { S, on, emit, commit, select, scene, mediaUrl, sceneRange, upload, here, activeSay, hold } from './store.js';
+import { STATUSES, COLORS, ASPECTS, RENDER_TYPES, RENDER_QUALITIES, layout, noteTime, noteState, forYou, totalDuration, activeRender, findScene, kindName, renderSize, renderLabel, renderQuality, renderCodec, qualityWords, aspectName, plural } from '/lib/ops.js';
+import { $, h, secs, ago, authorName, debounce, autosize, toast, menu, closeMenu, ask, tc as tcFmt } from './util.js';
 import { icons } from './icons.js';
 import { seek } from './player.js';
-import { STATUS_COLOR, sceneColor } from './viewer.js';
+import { STATUS_COLOR, sceneColor, versionQuality } from './viewer.js';
 import { actions } from './actions.js';
 import { wire, chips, takeFiles, pendingFiles, fileRow } from './attach.js';
 import { openAnnotator, ink } from './annotate.js';
+import { claudeState } from './handoff.js';
+import { setView } from './grid.js';
 
 const panel = $('#panel'), tabs = $('#tabs'), notesCount = $('#notesCount');
 const drafts = new Map();
+hold(() => [...drafts].some(([k, v]) => k.startsWith('reply:') && v.trim())); // a reply being written
 let noteFilter = 'open';
 let focusSession = 0;
 let restoring = false;
@@ -68,10 +73,14 @@ function markdown(src) {
     .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\w)/g, '$1<i>$2</i>')
     .replace(/(^|\W)_([^_\n]+)_(?!\w)/g, '$1<i>$2</i>')
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Lines run on, as in markdown: agents wrap their text at a width. Two spaces or a \ at the end break.
+  const lines = ls => ls.map((l, i) => inline(l.replace(/\\$/, '').trim()) + (i === ls.length - 1 ? '' : /( {2}|\\)$/.test(l) ? '<br>' : ' ')).join('');
   const out = [];
-  let list = null, para = [];
+  let list = null, item = null, para = [];
+  const endItem = () => { if (item) out.push(`<li>${lines(item)}</li>`); item = null; };
   const flush = () => {
-    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
+    endItem();
+    if (para.length) out.push(`<p>${lines(para)}</p>`);
     para = [];
     if (list) { out.push(`</${list}>`); list = null; }
   };
@@ -80,12 +89,14 @@ function markdown(src) {
     const li = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/.exec(line);
     if (hd) { flush(); out.push(`<h${Math.min(4, hd[1].length + 2)}>${inline(hd[2])}</h${Math.min(4, hd[1].length + 2)}>`); }
     else if (li) {
-      if (para.length) { out.push(`<p>${para.map(inline).join('<br>')}</p>`); para = []; }
+      if (para.length) { out.push(`<p>${lines(para)}</p>`); para = []; }
+      endItem();
       const kind = li[1] ? 'ol' : 'ul';
       if (list !== kind) { if (list) out.push(`</${list}>`); out.push(`<${kind}>`); list = kind; }
-      out.push(`<li>${inline(li[2])}</li>`);
+      item = [li[2]];
     } else if (!line.trim()) flush();
-    else { if (list) { out.push(`</${list}>`); list = null; } para.push(line); }
+    else if (item) item.push(line); // the item, wrapped onto the next line
+    else para.push(line);
   }
   flush();
   return out.join('');
@@ -117,17 +128,23 @@ function draftBox(key, placeholder, submit, { rows = 1, label = 'Send' } = {}) {
 
 function render() {
   for (const b of tabs.querySelectorAll('button')) b.classList.toggle('on', b.dataset.tab === S.tab);
+  // The first tab is the view's own: the scene in Edit, the film in Board.
+  const film = S.view === 'board', sceneTab = tabs.querySelector('[data-tab="scene"]');
+  sceneTab.textContent = film ? 'Film' : 'Scene';
+  sceneTab.title = film ? 'The whole film: how it renders, where it stands, the brief, the treatment and its settings' : 'The scene you selected, or else the one under the playhead';
   const open = S.board ? S.board.notes.filter(n => !n.resolved).length : 0;
   notesCount.textContent = open || '';
   if (!S.board) return panel.replaceChildren();
 
-  // keep focus, caret and scroll through the re-render
+  // keep focus, caret and scroll through the re-render; another tab, scene, board or filter starts at the top
   const active = document.activeElement;
   const key = panel.contains(active) ? active.dataset.key : null;
   const sel = key ? [active.selectionStart, active.selectionEnd] : null;
-  const top = panel.scrollTop;
+  const view = [S.slug, S.view, S.tab, S.tab === 'scene' ? shownScene()?.id : S.tab === 'notes' ? noteFilter : ''].join('|');
+  const top = view === shownView ? panel.scrollTop : 0;
+  shownView = view;
 
-  const body = S.tab === 'notes' ? notesPanel() : S.tab === 'activity' ? activityPanel() : scenePanel();
+  const body = S.tab === 'notes' ? notesPanel() : S.tab === 'activity' ? activityPanel() : film ? filmPanel() : scenePanel();
   panel.replaceChildren(...[body].flat(Infinity).filter(x => x instanceof Node));
 
   if (key) {
@@ -144,13 +161,17 @@ function render() {
   if (S.sel.note && S.sel.note !== lastNote) panel.querySelector(`[data-note="${CSS.escape(S.sel.note)}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   lastNote = S.sel.note;
 }
-let lastNote = null;
+let lastNote = null, shownView = '';
 
 // ---------------------------------------------------------------- scene
 
+// The scene the Edit pane shows: the one selected, or else the one under the playhead.
+const shownScene = () => scene(S.sel.scene) || (S.board?.scenes.length ? here()?.scene : null);
+
 function scenePanel() {
-  const s = scene(S.sel.scene);
-  if (!s) return boardPanel();
+  const s = shownScene();
+  if (!s) return h('div.sec', h('div.hint', 'No scenes yet. Add one with N, or hand the board to Claude to lay the idea out.'));
+  const following = !scene(S.sel.scene);
   const b = S.board;
   const rows = layout(b);
   const row = rows.find(r => r.scene.id === s.id);
@@ -177,7 +198,7 @@ function scenePanel() {
     h('div.sec',
       h('div.scene-head',
         h('span.scene-num', String(row.index + 1).padStart(2, '0')),
-        h('div', { style: { flex: 1, minWidth: 0 } }, title, timeLine(b, row)),
+        h('div', { style: { flex: 1, minWidth: 0 } }, title, timeLine(b, row), following && h('div.scene-id.following', 'At the playhead')),
         h('button.icon-btn.more', { title: 'More', html: icons.more, onclick: more }),
       ),
     ),
@@ -186,10 +207,11 @@ function scenePanel() {
         class: s.status === st ? 'on' : i < STATUSES.indexOf(s.status) ? 'past' : '', style: { '--sc': STATUS_COLOR[st] },
         onclick: () => s.status !== st && set({ status: st }),
       }, h('i'), st[0].toUpperCase() + st.slice(1)))),
+      playing(s),
     ),
     h('div.sec.props',
       h('span.label', 'Length'),
-      h('div.dur-row', dur, h('span.unit', 's'), h('div.facts', h('span', `${Math.round(s.duration * b.fps)}f`), beats != null && h('span', `${beats} beats`))),
+      h('div.dur-row', dur, h('span.unit', 's'), h('div.facts', h('span', `${Math.round(s.duration * b.fps)}f`), beats != null && h('span', plural(beats, 'beat')))),
       h('span.label', 'Colour'),
       h('div.swatches',
         h('button.none', { class: !s.color ? 'on' : '', title: 'Automatic: a colour unlike the scenes beside it', style: { '--c': 'var(--faint)' }, onclick: () => s.color && set({ color: null }) }),
@@ -212,17 +234,29 @@ function scenePanel() {
   ];
 }
 
+// What plays for this scene: which version, what it is (the quality it was rendered at, when that's
+// known), and when it came.
+function playing(s) {
+  const r = activeRender(s);
+  if (!r) return null;
+  return h('div.playing', h('span', 'Playing'), h('b', `v${s.renders.indexOf(r) + 1}`), h('span', versionQuality(r) || kindName(r)), h('span', ago(r.created)));
+}
+
 // A shot's versions as its history, oldest first: the idea sketches, then renders. One is active.
 // While Claude says it's working on this shot, the version it's making shows at the end.
-const versionTitle = r =>
-  r.kind === 'code' ? 'Code sketch' : r.sketch && /\.svg$/i.test(r.file) ? 'Drawing' : r.sketch ? (r.kind === 'video' ? 'Sketch clip' : 'Sketch') : r.kind === 'video' ? 'Clip' : 'Still';
+// A version's name on its tile: what the model calls it, except that an SVG sketch is a drawing.
+const versionTitle = r => {
+  if (r.sketch && /\.svg$/i.test(r.file)) return 'Drawing';
+  const k = kindName(r);
+  return k[0].toUpperCase() + k.slice(1);
+};
 
 function rendersSection(s) {
   const say = activeSay();
   const arriving = say?.scene === s.id ? say : null;
-  const tiles = s.renders.map(r => h('div.vtile', {
+  const tiles = s.renders.map((r, i) => h('div.vtile', {
     class: r.id === s.activeRender ? 'on' : '',
-    title: [r.caption, r.source, r.id === s.activeRender ? 'The active version' : 'Click to make this the active version'].filter(Boolean).join('\n'),
+    title: [`Version ${i + 1} of ${s.renders.length} (${r.id})`, versionQuality(r), r.caption, r.source, r.id === s.activeRender ? 'The active version' : 'Click to make this the active version'].filter(Boolean).join('\n'),
     onclick: () => r.id !== s.activeRender && commit([{ op: 'scene.set', id: s.id, fields: { activeRender: r.id } }]),
   },
     h('div.vthumb', { style: { backgroundImage: `url("${mediaUrl(r.poster || r.file)}")` } },
@@ -230,8 +264,8 @@ function rendersSection(s) {
       r.id === s.activeRender && h('span.vact', 'Active'),
       h('button.icon-btn.rm', { title: 'Remove this version', html: icons.x, onclick: e => { e.stopPropagation(); commit([{ op: 'render.remove', scene: s.id, id: r.id }]); } }),
     ),
-    h('div.vname', versionTitle(r)),
-    h('div.vmeta', `${r.id} · ${r.author === 'you' ? 'you' : r.author} · ${ago(r.created)}`),
+    h('div.vname', h('span.vn', `v${i + 1}`), versionTitle(r)),
+    h('div.vmeta', `${r.meta?.quality || authorName(r.author)} · ${ago(r.created)}`),
   ));
   if (arriving) tiles.push(h('div.vtile.arriving', { title: arriving.text },
     h('div.vthumb', h('div.work', { class: arriving.progress == null ? 'spin' : '', style: { '--p': arriving.progress ?? 0.25 } }),
@@ -267,7 +301,7 @@ function timeLine(b, row) {
   const beats = d / beat;
   const whole = Math.abs(beats - Math.round(beats)) * beat < 0.5 / b.fps;
   const nb = Math.round(beats);
-  const len = whole && nb % per === 0 ? `${nb / per} bar${nb / per === 1 ? '' : 's'}` : whole ? `${nb} beat${nb === 1 ? '' : 's'}` : `${+beats.toFixed(2)} beats`;
+  const len = whole && nb % per === 0 ? plural(nb / per, 'bar') : whole ? plural(nb, 'beat') : plural(+beats.toFixed(2), 'beat');
   // bar.beat of the nearest beat, and how many frames the cut is off it
   const pos = t => {
     const x = (t - off) / beat;
@@ -286,18 +320,28 @@ function timeLine(b, row) {
 
 // ---------------------------------------------------------------- board
 
-function boardPanel() {
+// The film, beside the wall: how it renders, where it stands, the brief and the treatment (Claude is in the
+// top bar, always). The
+// settings it rarely changes once it's set up come last, folded, with their values summed up beside them.
+let settingsOpen = (() => { try { return localStorage.getItem('sb.film.settings') === '1'; } catch { return false; } })();
+const openSettings = v => { settingsOpen = v; try { localStorage.setItem('sb.film.settings', v ? '1' : '0'); } catch {} };
+
+function filmPanel() {
   const b = S.board;
   const set = (fields, key) => commit([{ op: 'board.set', fields }], { key });
-  const numField = (k, v, opts = {}) => {
-    const el = bound(`board:${k}`, v ?? '', (val, key) => set({ [k]: val === '' ? null : +val }, key), { cls: 'num', type: 'number', placeholder: opts.placeholder || '' });
-    return el;
-  };
-  const cmd = `sb -b ${S.slug}`;
+  const numField = (k, v, opts = {}) => bound(`board:${k}`, v ?? '', (val, key) => set({ [k]: val === '' ? null : +val }, key), { cls: 'num', type: 'number', placeholder: opts.placeholder || '' });
+  const summary = [aspectName(b), `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, b.audio?.name].filter(Boolean).join(' · ');
   return [
     h('div.sec',
       bound('board:title', b.title, (v, k) => v.trim() && set({ title: v }, k), { cls: 'bare scene-title', placeholder: 'Board title' }),
-      h('div.board-hint', 'The whole board. Select a scene to edit it.'),
+    ),
+    h('div.sec',
+      h('div.sec-head', h('span.label', 'Render'), b.render && h('span.hint', 'set by Claude')),
+      renderInfo(b),
+    ),
+    h('div.sec',
+      h('div.sec-head', h('span.label', 'Progress')),
+      progress(b),
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Brief')),
@@ -305,57 +349,124 @@ function boardPanel() {
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Treatment')),
-      prose('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), 'The full plan: story beats, look, rules, references…'),
+      prose('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), 'The film thought through: the idea, the style, the shape, every scene, how it’s made.'),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Project folder')),
-      bound('board:project', b.project, (v, k) => set({ project: v }, k), { cls: 'num', placeholder: '/Users/…/dev/my-film — where the code that renders it lives' }),
+      h('button.fold', { class: settingsOpen ? 'open' : '', 'aria-expanded': String(settingsOpen), onclick: () => { openSettings(!settingsOpen); render(); } },
+        h('span.label', 'Settings'), !settingsOpen && h('span.fold-sum', summary), h('span.chev', { html: icons.chevron })),
     ),
-    h('div.sec.props.wide',
-      h('span.label', 'Size'), h('div.dur-row', numField('width', b.width), h('span.unit', '×'), numField('height', b.height)),
-      h('span.label', 'Frame rate'), h('div.dur-row', numField('fps', b.fps), h('span.unit', 'fps')),
-      h('span.label', 'Tempo'), h('div.dur-row', numField('bpm', b.bpm, { placeholder: 'none' }), h('span.unit', 'bpm')),
-      b.bpm && [h('span.label', 'Meter'), h('div.dur-row', numField('beatsPerBar', b.beatsPerBar), h('span.unit', 'beats a bar'))],
-      b.bpm && [h('span.label', 'First beat'), h('div.dur-row', numField('beatOffset', b.beatOffset), h('span.unit', 's'))],
-    ),
-    h('div.sec',
-      h('div.sec-head', h('span.label', 'Soundtrack')),
-      b.audio
-        ? h('div.row', h('span', { style: { flex: 1 } }, b.audio.name, h('span.hint', ` · ${secs(b.audio.duration)}`)),
-            h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, 'Replace'),
-            h('button.text-btn.danger', { onclick: () => commit([{ op: 'audio.set', audio: null }]) }, 'Remove'))
-        : h('div', h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, h('span', { html: icons.wave }), 'Add a soundtrack…'), h('div.hint', 'or drop one on the Audio lane')),
-    ),
-    b.markers.length > 0 && h('div.sec',
-      h('div.sec-head', h('span.label', 'Markers')),
-      b.markers.map(m => h('div.row',
-        h('span.chip', { onclick: () => seek(m.t) }, tcOf(m.t)),
-        bound(`marker:${m.id}`, m.label, (v, k) => v.trim() && commit([{ op: 'marker.set', id: m.id, fields: { label: v } }], { key: k }), { cls: 'bare' }),
-        h('button.icon-btn', { title: 'Delete marker', html: icons.x, onclick: () => commit([{ op: 'marker.remove', id: m.id }]) }),
-      )),
-    ),
-    h('div.sec',
-      h('div.sec-head', h('span.label', 'For Claude')),
-      h('div.agent-line', h('code', `${location.origin}/agent`),
-        h('button.icon-btn', { title: 'Copy', html: icons.copy, onclick: e => { navigator.clipboard?.writeText(`${location.origin}/agent`); toast('Copied'); } })),
-      h('div.hint', 'Claude works on the board through this address, never through this page.'),
-    ),
+    settingsOpen && [
+      h('div.sec',
+        h('div.sec-head', h('span.label', 'Project folder')),
+        bound('board:project', b.project, (v, k) => set({ project: v }, k), { cls: 'num', placeholder: '/Users/…/dev/my-film — where the code that renders it lives' }),
+      ),
+      h('div.sec',
+        h('div.sec-head', h('span.label', 'Shape')),
+        shapePicker(b, set),
+      ),
+      h('div.sec.props.wide',
+        h('span.label', 'Frame rate'), h('div.dur-row', numField('fps', b.fps), h('span.unit', 'fps')),
+        h('span.label', 'Tempo'), h('div.dur-row', numField('bpm', b.bpm, { placeholder: 'none' }), h('span.unit', 'bpm')),
+        b.bpm && [h('span.label', 'Meter'), h('div.dur-row', numField('beatsPerBar', b.beatsPerBar), h('span.unit', 'beats a bar'))],
+        b.bpm && [h('span.label', 'First beat'), h('div.dur-row', numField('beatOffset', b.beatOffset), h('span.unit', 's'))],
+      ),
+      h('div.sec',
+        h('div.sec-head', h('span.label', 'Soundtrack')),
+        b.audio
+          ? h('div.row', h('span', { style: { flex: 1 } }, b.audio.name, h('span.hint', ` · ${secs(b.audio.duration)}`)),
+              h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, 'Replace'),
+              h('button.text-btn.danger', { onclick: () => commit([{ op: 'audio.set', audio: null }]) }, 'Remove'))
+          : h('div', h('button.text-btn', { onclick: () => actions.pickFile({ audio: true }) }, h('span', { html: icons.wave }), 'Add a soundtrack…'), h('div.hint', 'or drop one on the Audio lane, in Edit')),
+      ),
+      b.markers.length > 0 && h('div.sec',
+        h('div.sec-head', h('span.label', 'Markers')),
+        b.markers.map(m => h('div.row',
+          h('span.chip', { onclick: () => seek(m.t) }, tcOf(m.t)),
+          bound(`marker:${m.id}`, m.label, (v, k) => v.trim() && commit([{ op: 'marker.set', id: m.id, fields: { label: v } }], { key: k }), { cls: 'bare' }),
+          h('button.icon-btn', { title: 'Delete marker', html: icons.x, onclick: () => commit([{ op: 'marker.remove', id: m.id }]) }),
+        )),
+      ),
+    ],
   ];
+}
+
+// Where the film stands: its scenes by status, as a bar in the status colours and in words, its length,
+// and the notes waiting for you (which open the Notes tab).
+const STATUS_WORD = { idea: n => plural(n, 'idea'), draft: n => plural(n, 'draft'), review: n => `${n} in review`, approved: n => `${n} approved` };
+function progress(b) {
+  if (!b.scenes.length) return h('div.hint', 'No scenes yet.');
+  const counts = STATUSES.map(st => [st, b.scenes.filter(s => s.status === st).length]).filter(([, n]) => n);
+  const len = Math.round(totalDuration(b));
+  const waiting = b.notes.filter(forYou).length, open = b.notes.filter(n => !n.resolved).length;
+  return [
+    h('div.film-bar', counts.map(([st, n]) => h('i', { style: { flex: n, '--sc': STATUS_COLOR[st] }, 'data-tip': STATUS_WORD[st](n) }))),
+    h('div.film-facts', [plural(b.scenes.length, 'scene'), `${Math.floor(len / 60)}:${String(len % 60).padStart(2, '0')}`, ...counts.map(([st, n]) => STATUS_WORD[st](n))].join(' · ')),
+    open > 0 && h('button.link.film-notes', { class: waiting ? 'waiting' : '', onclick: () => { S.tab = 'notes'; render(); } },
+      waiting ? `${plural(waiting, 'note')} waiting for you` : plural(open, 'open note')),
+  ];
+}
+
+// How the film is rendered, as Claude set it once it had decided: shown, not edited here. Its kind (what
+// that is, on hover) and what draft and final mean in this film.
+function renderInfo(b) {
+  if (!b.render) return h('div.hint', 'Not decided yet. Claude sets it once it has decided how the film is rendered, and what draft and final mean for it.');
+  return h('div.render-info',
+    h('div.render-kind', b.render.type.map(t => h('span', { 'data-tip': RENDER_TYPES[t].what }, RENDER_TYPES[t].label))),
+    RENDER_QUALITIES.some(q => b.render[q]) && h('div.props.wide',
+      RENDER_QUALITIES.filter(q => b.render[q]).map(q => [h('span.label', q === 'draft' ? 'Draft' : 'Final'), h('span.render-q', b.render[q])])));
 }
 
 // ---------------------------------------------------------------- notes
 
 function whoEl(author) {
   const you = author === 'you';
-  return h('span.who', h('span.avatar', { class: you ? '' : 'claude', html: you ? 'Y' : icons.spark }), you ? 'You' : author[0].toUpperCase() + author.slice(1));
+  return h('span.who', h('span.avatar', { class: you ? '' : 'claude', html: you ? 'Y' : icons.spark }), authorName(author));
 }
 
-// What a note is about, as a pill: the exact frame (click to go there), the whole scene, or the board.
+// The board's shape: the usual ones, or any other as w:h.
+function shapePicker(b, set) {
+  const name = aspectName(b), other = !ASPECTS.includes(name);
+  const custom = async e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    const v = await ask(r.left, r.bottom + 6, { value: other ? name : '', placeholder: 'w:h, e.g. 3:2 or 1.85:1', ok: 'Set' });
+    if (v) set({ aspect: v });
+  };
+  return h('div.seg.small.shapes',
+    ASPECTS.map(a => h('button', { class: a === name ? 'on' : '', onclick: () => a !== name && set({ aspect: a }) }, a)),
+    h('button', { class: other ? 'on' : '', title: 'Another shape, as w:h', onclick: custom }, other ? name : 'Other…'));
+}
+
+// The film pane: Board view, its first tab.
+export function openFilm() {
+  emit('panel');
+  if (S.view !== 'board') setView('board');
+  S.tab = 'scene';
+  render();
+}
+
+// A board's settings: the film pane with its settings unfolded, the title ready to rename. Another
+// board opens first.
+let settingsFor = null;
+export function openBoardSettings(slug = S.slug) {
+  if (slug !== S.slug) { settingsFor = slug; location.hash = slug; return; }
+  openSettings(true);
+  openFilm();
+  requestAnimationFrame(() => panel.querySelector('[data-key="board:title"]')?.focus());
+}
+on('open', () => { if (settingsFor === S.slug) { settingsFor = null; openBoardSettings(); } });
+
+// What a note is about, as a pill: the exact frame (click to go there), the whole scene, the board,
+// or the soundtrack (a moment in it, or all of it).
 function scopePill(n) {
   const b = S.board;
   const s = findScene(b, n.scene);
   const t = noteTime(b, n);
-  if (!n.scene) return h('span.scope.is-board', 'Whole board');
+  if (n.soundtrack && t == null) return h('span.scope.is-board', 'Whole soundtrack');
+  if (n.soundtrack) {
+    return h('span.scope.is-frame', { title: 'Go to this moment', onclick: () => { select(null, { note: n.id, keepTime: true }); seek(t); } },
+      h('span', { html: icons.wave, style: { display: 'inline-grid' } }), `Soundtrack ${tcOf(t)}`);
+  }
+  if (!n.scene) return h('span.scope.is-board', 'Whole film');
   if (!s) return h('span.scope.is-board', 'Deleted scene');
   if (n.at == null) return h('span.scope.is-scene', { title: 'Go to the scene', onclick: () => { select(s.id, { note: n.id, keepTime: true }); seek(sceneRange(s.id).start); } }, 'Whole scene');
   return h('span.scope.is-frame', { title: `Go to this exact frame (f${Math.round(t * b.fps)})`, onclick: () => { select(s.id, { note: n.id, keepTime: true }); seek(t); } },
@@ -364,21 +475,21 @@ function scopePill(n) {
 }
 const tcOf = t => tcFmt(t, S.board.fps);
 
-// Where a note is in its life, from the user's side: a draft, sent, read by Claude, being worked on,
-// answered, done.
+// Where a note is in its life, from the user's side: not sent, sent, read by Claude, being worked on,
+// answered, done. Shown as a light; the tip says it in words.
 export function noteStatus(n) {
-  if (n.resolved) return { key: 'done', label: 'Resolved', tip: `${n.resolvedBy ? `Resolved by ${nameOf(n.resolvedBy)}` : 'Done'}. Reopen it if it isn’t.` };
-  if (n.author === 'you' && !n.sent) return { key: 'draft', label: 'Draft', tip: 'Not sent yet. Claude gets it when you press Send to Claude.' };
-  const last = n.replies.at(-1);
-  const answered = last && last.author !== 'you';
-  // A reply written after work started is news; before that, the work is.
-  if (n.working && !(answered && last.created > n.working)) return { key: 'working', label: 'Working', tip: `${nameOf(n.readBy || 'claude')} is working on it.` };
-  if (answered) return { key: 'replied', label: 'Replied', tip: `${nameOf(last.author)} replied. Read it, then reply or mark it done.` };
-  if (n.author === 'you' && n.read) return { key: 'read', label: 'Read', tip: `${nameOf(n.readBy || 'claude')} has read it${n.read ? ` (${ago(n.read)})` : ''}.` };
-  if (n.author === 'you') return { key: 'sent', label: 'Sent', tip: 'Sent. Claude hasn’t picked it up yet.' };
-  return { key: 'agent', label: `From ${nameOf(n.author)}`, tip: `${nameOf(n.author)} wrote this note to you.` };
+  const key = noteState(n);
+  switch (key) {
+    case 'done': return { key, light: 'is-done', label: 'Resolved', tip: `Resolved${n.resolvedBy ? ` by ${authorName(n.resolvedBy)}` : ''}. Reopen it if it isn’t done.` };
+    case 'draft': return { key, light: 'is-unsent', label: 'Not sent', tip: 'Not sent yet: it goes to Claude with your other notes when you press Send to Claude.' };
+    case 'working': return { key, light: 'is-work', label: 'Working', tip: `${authorName(n.readBy || 'claude')} is working on it.` };
+    case 'replied': return { key, light: 'is-ask', label: 'Replied', tip: `${authorName(n.replies.at(-1).author)} replied: read it, then reply or mark it done.` };
+    case 'read': return { key, light: 'is-read', label: 'Read', tip: `Read by ${authorName(n.readBy || 'claude')} ${ago(n.read)}.` };
+    case 'sent': return { key, light: 'is-sent', label: 'Sent', tip: 'Sent: Claude hasn’t picked it up yet.' };
+    default: return { key, light: 'is-ask', label: `From ${authorName(n.author)}`, tip: `${authorName(n.author)} wrote this note to you.` };
+  }
 }
-const nameOf = a => (a === 'you' ? 'You' : a[0].toUpperCase() + a.slice(1));
+export const statusLight = n => { const st = noteStatus(n); return h('i.light', { class: st.light, 'data-tip': st.tip }); };
 
 function noteCard(n) {
   const b = S.board;
@@ -396,7 +507,7 @@ function noteCard(n) {
     'data-note': n.id,
     onclick: e => {
       if (e.target.closest('button, textarea, .scope, a')) return;
-      // Picking a frame note takes you to its frame (where its pin is); picking it again there lets go.
+      // Picking a frame note takes you to its frame; picking it again there lets go.
       const t = n.at != null ? noteTime(b, n) : null;
       const away = t != null && Math.round(S.t * b.fps) !== Math.round(t * b.fps);
       S.sel = { scene: S.sel.scene, note: selected && !away ? null : n.id };
@@ -409,23 +520,31 @@ function noteCard(n) {
       scopePill(n),
       h('span.grow'),
       h('div.note-actions',
-        draft && h('button.icon-btn', { title: 'Edit this draft', html: icons.edit, onclick: editText }),
+        draft && h('button.icon-btn', { title: 'Edit this note (it isn’t sent yet)', html: icons.edit, onclick: editText }),
         h('button.icon-btn', { title: 'Delete note', html: icons.trash, onclick: () => commit([{ op: 'note.remove', id: n.id }]) }),
       ),
-      h('span.note-status', { class: `s-${st.key}`, title: st.tip }, st.label),
+      statusLight(n),
     ),
+    n.render && requestLine(n),
     n.text && longText(n.id, h('div.note-text', n.text), n.text),
     n.markup && markupBlock(n),
     fileRow(n.files),
     n.replies.length > 0 && h('div.replies', n.replies.map((r, i) => h('div.reply', whoEl(r.author), r.text && longText(`${n.id}.${i}`, h('div.reply-text', r.text), r.text), fileRow(r.files)))),
     h('div.note-foot',
-      h('span.when', ago(n.created), n.resolved && n.resolvedBy && ` · resolved by ${n.resolvedBy === 'you' ? 'you' : nameOf(n.resolvedBy)}`),
+      h('span.when', ago(n.created), n.resolved && n.resolvedBy && ` · resolved by ${n.resolvedBy === 'you' ? 'you' : authorName(n.resolvedBy)}`),
       h('span.grow'),
       !draft && !n.resolved && !selected && h('button.link', { onclick: () => { S.sel = { scene: S.sel.scene, note: n.id }; emit('select'); } }, 'Reply'),
       !draft && h('button.link', { class: n.resolved ? 'reopen' : 'done', onclick: () => commit([{ op: 'note.set', id: n.id, fields: { resolved: !n.resolved } }]) }, n.resolved ? 'Reopen' : 'Mark done'),
     ),
     selected && !draft && !n.resolved && h('div.reply-box', draftBox(`reply:${n.id}`, 'Reply…', (text, files) => commit([{ op: 'reply.add', note: n.id, reply: { text, ...(files.length ? { files } : {}) } }]), { label: 'Reply' })),
   );
+}
+
+// A render request: what was asked for, at what size and quality.
+function requestLine(n) {
+  const d = renderSize(S.board, n.render.size), still = n.at != null;
+  return h('div.note-render', h('span.nr-icon', { html: icons.render }), h('b', `Render ${renderLabel(n)}`),
+    h('span.nr-spec', still ? `one ${d.w}×${d.h} still · PNG` : `${d.w}×${d.h} · ${qualityWords(S.board, renderQuality(n.render))} · ${renderCodec(n.render, false)}`));
 }
 
 // A marked-up frame: the picture with the marks, and each mark's words by number. Click to open it.
@@ -456,8 +575,10 @@ function notesPanel() {
   const cur = S.board.scenes.length ? here()?.scene.id : null;
   const byTime = (x, y) => (x.at ?? -1) - (y.at ?? -1) || x.created.localeCompare(y.created);
   const groups = [];
-  const boardNotes = shown.filter(n => !n.scene);
-  if (boardNotes.length) groups.push({ key: 'board', head: h('div.ngroup-head', h('i', { style: { '--c': 'var(--faint)' } }), h('b', 'Whole board')), notes: boardNotes });
+  const boardNotes = shown.filter(n => !n.scene && !n.soundtrack);
+  if (boardNotes.length) groups.push({ key: 'board', head: h('div.ngroup-head', h('i', { style: { '--c': 'var(--faint)' } }), h('b', 'Whole film')), notes: boardNotes });
+  const soundNotes = shown.filter(n => n.soundtrack).sort(byTime);
+  if (soundNotes.length) groups.push({ key: 'soundtrack', head: h('div.ngroup-head', h('span.ng-icon', { html: icons.wave }), h('b', 'Soundtrack')), notes: soundNotes });
   for (const { scene: s, index, start, end } of layout(b)) {
     const ns = shown.filter(n => n.scene === s.id).sort(byTime);
     if (!ns.length) continue;
@@ -484,13 +605,27 @@ function notesPanel() {
     ),
     groups.length
       ? groups.map(g => h('div.ngroup', { class: g.current ? 'current' : '' }, g.head, g.notes.map(noteCard)))
-      : h('div.sec', h('div.empty-notes', noteFilter === 'open' ? 'Nothing open. Pause where something’s off, press C and write it down; add as many as you like, then Send to Claude.' : noteFilter === 'done' ? 'Nothing resolved yet.' : 'No notes yet.')),
+      : h('div.sec', h('div.empty-notes', { title: 'Write as many notes as you like; Send to Claude sends them all at once' }, noteFilter === 'open' ? 'No open notes. Press C to write one.' : noteFilter === 'done' ? 'Nothing resolved yet.' : 'No notes yet.')),
   ];
 }
 
 // ---------------------------------------------------------------- activity
 
 // Every change, newest first. An agent's change can be reverted from here (your own undo is ⌘Z).
+// A long batch (thirty titles at once, say) shows its first lines until asked for the rest, and a run of
+// the same kind of change (an agent taking old versions off a scene one by one) shows as one row, with
+// how many more like it, until asked for them.
+const unfolded = new Set();
+const kindOf = s => s.replace(/\b[rsnm]\d+\b/g, '#').replace(/\d+(\.\d+)?/g, '0');
+function runs(list) {
+  const out = [];
+  for (const e of list) {
+    const last = out.at(-1), one = e.summaries.length === 1;
+    if (last && one && last.head.summaries.length === 1 && e.author === last.head.author && kindOf(e.summaries[0]) === kindOf(last.head.summaries[0])) last.more.push(e);
+    else out.push({ head: e, more: [] });
+  }
+  return out;
+}
 function activityPanel() {
   if (!S.activity.length) return h('div.hint', 'Nothing has happened yet.');
   // Show what reverting would do before doing it; the revert is then your own (undoable) change.
@@ -504,22 +639,31 @@ function activityPanel() {
       h('h3', `Revert rev ${e.rev}?`),
       h('p', 'This will:'),
       h('ul', lines.map(s => h('li', s)), j.summaries.length > lines.length && h('li.more', `and ${j.summaries.length - lines.length} more`)),
-      j.later > 0 && h('p.warn', `${j.later} later change${j.later > 1 ? 's' : ''} came after this one. Anything built on it goes too.`),
+      j.later > 0 && h('p.warn', `${plural(j.later, 'later change')} came after this one. Anything built on it goes too.`),
       h('div.row', h('button.text-btn', { onclick: () => closeMenu() }, 'Cancel'),
         h('button.text-btn.primary', { onclick: async () => { closeMenu(); if (await commit(j.ops)) toast(`Reverted rev ${e.rev} · ⌘Z brings it back`); } }, 'Revert')),
     );
     menu(Math.max(8, at.right - 330), at.bottom + 6, [], { el: pop });
   };
-  return h('div.activity', S.activity.slice(0, 150).map(e => {
+  const row = e => {
     const you = e.author === 'you';
     const agent = !you && e.author !== 'storyboard';
+    const long = e.summaries.length > 5, folded = long && !unfolded.has(e.rev);
     return h('div.act-row',
       h('span.avatar', { class: you ? '' : 'claude', html: you ? 'Y' : icons.spark }),
       h('div',
-        h('div.what', e.summaries.map((s, i) => h('div', i === 0 && h('b', you ? 'You ' : `${e.author[0].toUpperCase()}${e.author.slice(1)} `), s))),
+        h('div.what', (folded ? e.summaries.slice(0, 3) : e.summaries).map((s, i) => h('div', i === 0 && h('b', `${authorName(e.author)} `), s)),
+          long && h('button.link.more', { onclick: () => { folded ? unfolded.add(e.rev) : unfolded.delete(e.rev); render(); } }, folded ? `and ${e.summaries.length - 3} more` : 'Show less')),
         h('div.when', `${ago(e.created)} · rev ${e.rev}`, agent && h('button.link.revert', { title: 'Undo this change (shows what it will do first)', onclick: ev => revert(e, ev) }, 'Revert')),
       ),
     );
+  };
+  return h('div.activity', runs(S.activity.slice(0, 150)).map(({ head, more }) => {
+    if (!more.length) return row(head);
+    const key = `run:${head.rev}`, open = unfolded.has(key);
+    return [row(head),
+      h('button.link.more.act-run', { onclick: () => { open ? unfolded.delete(key) : unfolded.add(key); render(); } }, open ? 'Show less' : `and ${plural(more.length, 'more change')} like it`),
+      open && more.map(row)];
   }));
 }
 
@@ -531,19 +675,22 @@ on('select', render);
 let sayKey = '';
 on('presence', () => {
   const s = activeSay();
-  const k = s ? `${s.scene}|${s.progress}|${s.text}` : '';
+  const k = `${claudeState(S.board?.owner).key}|${s ? `${s.scene}|${s.progress}|${s.text}` : ''}`;
   if (k === sayKey) return;
   sayKey = k;
   if (S.tab === 'scene') render();
 });
-// Keep "you are here" true in the Notes panel as the playhead crosses into another scene.
+// As the playhead crosses into another scene: "you are here" in the Notes panel, and the Edit pane when
+// it follows the playhead (no scene selected). Never while you're typing in the pane.
 let hereId = null;
 on('time', () => {
   const id = S.board?.scenes.length ? here()?.scene.id : null;
   if (id === hereId) return;
   hereId = id;
-  if (S.tab === 'notes' && !panel.contains(document.activeElement)) render();
+  if (panel.contains(document.activeElement)) return;
+  if (S.tab === 'notes' || (S.tab === 'scene' && S.view === 'edit' && !scene(S.sel.scene))) render();
 });
+on('view', render);
 on('activity', () => { if (S.tab === 'activity') render(); });
 on('focus-title', () => requestAnimationFrame(() => { const t = $('#sceneTitle'); if (t) { t.focus(); t.select(); } }));
 setInterval(() => { if (!panel.contains(document.activeElement)) render(); }, 30000);

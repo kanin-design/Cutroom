@@ -46,6 +46,9 @@ export const icons = {
   insertL: I('<path d="M6 3v10"/><rect x="8.5" y="4.5" width="5" height="7" rx="1"/><path d="M2 8h2"/>'),
   insertR: I('<path d="M10 3v10"/><rect x="2.5" y="4.5" width="5" height="7" rx="1"/><path d="M12 8h2"/>'),
   flag: I('<path d="M3.5 14V2.5M3.5 3h8l-1.5 3 1.5 3h-8"/>'),
+  panel: I('<rect x="2" y="3" width="12" height="10" rx="1.5"/><path d="M10 3v10"/>'),
+  settings: I('<path d="M2.5 4.5h6.5M13 4.5h.5M2.5 11.5h.5M7 11.5h6.5"/><circle cx="11" cy="4.5" r="1.75"/><circle cx="5" cy="11.5" r="1.75"/>'),
+  render: I('<rect x="2" y="2.5" width="12" height="9" rx="1.5"/><path d="M6.5 5v4l3.5-2z" fill="currentColor"/><path d="M5.5 14h5"/>'),
   upload: I('<path d="M8 10.5V2.5M4.5 6 8 2.5 11.5 6"/><path d="M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2"/>'),
   spark: `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M8 .8c.4 0 .7.3.7.7l.3 4.2 3-3a.7.7 0 0 1 1 1l-3 3 4.2.3a.7.7 0 0 1 0 1.4L10 8.7l3 3a.7.7 0 1 1-1 1l-3-3-.3 4.2a.7.7 0 0 1-1.4 0L7 9.7l-3 3a.7.7 0 1 1-1-1l3-3-4.2-.3a.7.7 0 0 1 0-1.4L6 6.7l-3-3a.7.7 0 0 1 1-1l3 3 .3-4.2c0-.4.3-.7.7-.7Z"/></svg>`,
 };

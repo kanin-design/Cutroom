@@ -1,7 +1,6 @@
 import { icons } from './icons.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
-export const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 export const clamp = (x, a, z) => Math.min(z, Math.max(a, x));
 
 // h('div.cls#id', {attrs, onclick, style}, ...children)
@@ -27,36 +26,14 @@ export function h(sel, attrs, ...kids) {
   return el;
 }
 
-export const icon = name => h('span', { html: icons[name] || '', style: { display: 'inline-grid' } });
+const icon = name => h('span', { html: icons[name] || '', style: { display: 'inline-grid' } });
 
 // 00:01:11:15, as editors write it (hours:minutes:seconds:frames)
 export { timecode as tc } from '/lib/ops.js';
 
-// A time typed into the timecode, read the way editors do: digits fill from the right, so 2115 and
-// 21:15 are 00:00:21:15 and 5 is five frames; a leading + or - moves from `now` instead.
-// Returns seconds, or null if it isn't a time.
-export function parseTc(text, fps, now = 0) {
-  const m = /^\s*([+-]?)\s*([\d:;.\s]+)$/.exec(text);
-  if (!m) return null;
-  const body = m[2].trim();
-  let parts;
-  if (/[:;.]/.test(body)) parts = body.split(/\s*[:;.]\s*/);
-  else {
-    const d = body.replace(/\s+/g, '');
-    if (!d || d.length > 8) return null;
-    const p = d.padStart(8, '0');
-    parts = [p.slice(0, 2), p.slice(2, 4), p.slice(4, 6), p.slice(6)];
-  }
-  if (parts.length > 4 || parts.some(x => !/^\d*$/.test(x))) return null;
-  const [ff = 0, ss = 0, mm = 0, hh = 0] = parts.reverse().map(x => +x || 0);
-  const t = (((hh * 60 + mm) * 60 + ss) * Math.round(fps) + ff) / fps;
-  return m[1] === '+' ? now + t : m[1] === '-' ? now - t : t;
-}
 export const secs = t => `${+(+t).toFixed(t < 10 ? 2 : 1)}s`;
-export const short = t => {
-  const m = Math.floor(t / 60), s = t - m * 60;
-  return m ? `${m}:${s.toFixed(1).padStart(4, '0')}` : `${s.toFixed(2)}s`;
-};
+// An author as the editor shows them: "You", "Claude".
+export const authorName = a => a[0].toUpperCase() + a.slice(1);
 
 export function ago(iso) {
   const d = (Date.now() - new Date(iso).getTime()) / 1000;

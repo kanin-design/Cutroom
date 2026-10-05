@@ -2,19 +2,21 @@
 // visible stretch; scenes, note flags and the playhead are DOM on top. Native horizontal
 // scrolling gives trackpad momentum; pinch (or ⌘/Ctrl + wheel) zooms around the pointer.
 
-import { S, on, emit, commit, select, sceneRange, mediaUrl, upload, undo, here, activeSay } from './store.js';
-import { layout, activeRender, totalDuration, snapFrame, noteTime, defaultDuration, STATUSES } from '/lib/ops.js';
-import { $, h, clamp, secs, short, tc, menu, ask, toast } from './util.js';
+import { S, on, commit, select, sceneRange, mediaUrl, upload, here, activeSay } from './store.js';
+import { layout, activeRender, totalDuration, snapFrame, noteTime, noteState, plural, STATUSES, renderLabel } from '/lib/ops.js';
+import { $, h, clamp, secs, tc, menu, ask, authorName } from './util.js';
 import { icons } from './icons.js';
 import { seek, end, pause } from './player.js';
 import { STATUS_COLOR, sceneColor } from './viewer.js';
 import { actions } from './actions.js';
 import { noteStatus } from './inspector.js';
+import { noteOnSoundtrack } from './composer.js';
+import { openRender } from './render.js';
 
 const PAD = 14;
 const MIN_PPS = 2, MAX_PPS = 2400;
 const tl = $('#timeline'), scroll = $('#tlScroll'), content = $('#tlContent'), canvas = $('#tlCanvas');
-const laneScenes = $('#laneScenes'), laneNotes = $('#laneNotes'), laneAudio = $('#laneAudio'), markersEl = $('#markers');
+const laneScenes = $('#laneScenes'), laneNotes = $('#laneNotes'), laneAudio = $('#laneAudio'), soundLane = $('#soundLane'), markersEl = $('#markers');
 const playhead = $('#playhead'), snapline = $('#snapline'), zoom = $('#zoom'), audioName = $('#audioName');
 const ctx = canvas.getContext('2d');
 const Y = { ruler: 34, scenes: 0, hScenes: 0, notes: 0, hNotes: 28, audio: 0, hAudio: 46 };
@@ -230,6 +232,28 @@ async function loadPeaks() {
 
 // ---------------------------------------------------------------- scenes
 
+// What a clip's label has room for, measured in its fonts: the title where at least four letters of it
+// show (otherwise just the number), the length where all of it fits, and nothing on a sliver too
+// narrow for its number. Returned as classes for the clip.
+const textCtx = document.createElement('canvas').getContext('2d');
+let fonts = null;
+const textW = (text, font) => {
+  fonts ??= { body: getComputedStyle(document.body).fontFamily, mono: getComputedStyle(document.body).getPropertyValue('--mono') };
+  textCtx.font = font(fonts);
+  return textCtx.measureText(text).width;
+};
+function clipFit(w, num, title, len) {
+  const pad = w < 36 ? 3 : w < 110 ? 6 : 8; // .clip .top's padding at that width
+  const numW = textW(num, f => `500 10px ${f.mono}`);
+  if (w - 2 * pad < numW) return 'bare';
+  const room = w - 2 * pad - numW - 6;
+  const titleW = t => textW(t, f => `600 11.5px ${f.body}`);
+  const fit = [];
+  if (w < 36 || (titleW(title) > room && titleW(`${title.slice(0, 4)}…`) > room)) fit.push('no-title');
+  if (w >= 36 && 12 + textW(len, f => `10px ${f.mono}`) > w - 12) fit.push('no-foot'); // dot and gap, then the length
+  return fit.join(' ');
+}
+
 function renderClips() {
   if (!S.board) return;
   const b = S.board;
@@ -240,8 +264,9 @@ function renderClips() {
   const els = layout(b).map(({ scene: s, index, start }) => {
     const w = Math.max(3, s.duration * S.pps - 2);
     const r = activeRender(s);
+    const num = String(index + 1).padStart(2, '0');
     const el = h('div.clip', {
-      class: `${r ? '' : 'plain'} ${S.sel.scene === s.id ? 'sel' : ''} ${w < 36 ? 'tiny' : w < 110 ? 'small' : ''} ${now - (S.glow.get(s.id) || -1e9) < 2600 ? 'glow' : ''}`,
+      class: `${r ? '' : 'plain'} ${S.sel.scene === s.id ? 'sel' : ''} ${w < 36 ? 'tiny' : w < 110 ? 'small' : ''} ${clipFit(w, num, s.title, secs(s.duration))} ${now - (S.glow.get(s.id) || -1e9) < 2600 ? 'glow' : ''}`,
       style: { left: xOf(start) + 'px', width: w + 'px', '--c': sceneColor(s) },
       'data-id': s.id,
       title: `${String(index + 1).padStart(2, '0')} ${s.title} · ${secs(s.duration)}${r ? ` · ${r.sketch ? 'sketch' : 'render'} ${r.id}` : ''}`,
@@ -272,15 +297,15 @@ function renderClips() {
       el.title += `\n${b.owner || 'Claude'}: ${say.text}${say.progress != null ? ` · ${Math.round(say.progress * 100)}%` : ''}`;
       el.append(h('div.work', { class: say.progress == null ? 'spin' : '', style: { '--p': say.progress ?? 0.25 } }));
     }
-    el.append(
-      h('div.top', h('div.label', s.title)),
-      !r && s.picture ? h('div.desc', s.picture) : null,
+    el.append(...[
+      h('div.top', h('div.label', h('span.cn', num), h('span.ct', s.title))),
+      !r && s.picture && h('div.desc', s.picture),
       h('div.foot',
         h('i.sdot', { style: { '--sc': STATUS_COLOR[s.status] }, title: s.status }),
         h('span', secs(s.duration)),
       ),
       h('div.handle', { title: 'Drag to change the duration · Alt: roll the cut' }),
-    );
+    ].filter(Boolean)); // append() would print a null as text
     return el;
   });
   laneScenes.replaceChildren(...els);
@@ -294,13 +319,6 @@ function renderClips() {
 // the one that's selected.
 const ROW_H = 22, MAX_ROWS = 3;
 let noteRows = 1;
-
-function openNote(n, t) {
-  S.tab = 'notes';
-  select(n.scene, { note: n.id, keepTime: true });
-  if (t != null) seek(t);
-  else if (n.scene) seek(sceneRange(n.scene).start);
-}
 
 function renderNotes() {
   if (!S.board) return;
@@ -350,10 +368,10 @@ function renderNotes() {
   const out = [];
   for (const it of items) {
     const n = it.n;
-    const st = noteState(n);
+    const st = cardState(n);
     const top = it.row * ROW_H + 3;
     const cls = `${it.kind} ${st} ${n.pin ? 'spot' : ''} ${n.markup ? 'marked' : ''} ${S.sel.note === n.id ? 'sel' : ''}`;
-    const tip = `#${num(n)} ${n.author === 'you' ? 'You' : n.author}${it.kind === 'frame' ? ` · frame ${tc(it.t, b.fps)}${n.pin ? ' · spot' : ''}` : ' · the whole scene'} · ${noteStatus(n).label}\n${n.text}`;
+    const tip = `#${num(n)} ${authorName(n.author)}${it.kind === 'frame' ? ` · frame ${tc(it.t, b.fps)}${n.pin ? ' · spot' : ''}` : ' · the whole scene'} · ${noteStatus(n).label}\n${n.text}`;
     if (it.kind === 'frame') {
       const h0 = Y.notes - Y.scenes + top + 10;
       out.push(h('div.nline', { class: S.sel.note === n.id ? 'sel' : '', style: { left: it.x + 'px', top: -(Y.notes - Y.scenes) + 'px', height: h0 + 'px', '--pc': who(n) } }));
@@ -363,35 +381,73 @@ function renderNotes() {
       style: { left: it.x0 + 'px', top: top + 'px', width: it.w + 'px', '--pc': who(n) },
       title: tip,
       onpointerdown: e => e.stopPropagation(),
-      onclick: () => openNote(n, it.t),
+      onclick: () => actions.openNote(n),
     },
       it.kind === 'frame' && h('i.ndot'),
       h('b', `#${num(n)}`),
-      n.files && h('span.nclip', { html: icons.clip, title: `${n.files.length} file${n.files.length > 1 ? 's' : ''} attached` }),
-      n.markup && h('span.nmarks', { html: icons.markup, title: `${n.markup.marks.length} mark${n.markup.marks.length === 1 ? '' : 's'} on the frame` }),
-      h('span.ntxt', n.text.replace(/\s+/g, ' ') || n.markup?.marks.map(m => m.text).filter(Boolean).join(' · ') || n.files?.map(f => f.name).join(', ') || ''),
-      st === 'replied' && h('span.nflag', { html: icons.reply, title: 'Claude replied' }),
-      st === 'read' && h('span.nflag.read', { html: icons.check, title: 'Claude has read it' }),
-      st === 'working' && h('span.nflag.working', { title: 'Claude is working on it' }),
+      n.files && h('span.nclip', { html: icons.clip, title: `${plural(n.files.length, 'file')} attached` }),
+      n.markup && h('span.nmarks', { html: icons.markup, title: `${plural(n.markup.marks.length, 'mark')} on the frame` }),
+      h('span.ntxt', cardText(n)),
+      ...cardFlags(st),
     ));
   }
   laneNotes.replaceChildren(...out);
 
-  // notes about the whole board
-  const boardNotes = b.notes.filter(n => !n.scene && !n.resolved);
+  // notes about the whole film
+  const boardNotes = b.notes.filter(n => !n.scene && !n.soundtrack && !n.resolved);
   const chip = $('#boardNotes');
   chip.hidden = !boardNotes.length;
   if (boardNotes.length) {
-    chip.className = `head-board ${boardNotes.some(n => noteState(n) === 'unsent') ? 'unsent' : ''} ${boardNotes.some(n => noteState(n) === 'replied') ? 'replied' : ''}`;
+    chip.className = `head-board ${boardNotes.some(n => cardState(n) === 'unsent') ? 'unsent' : ''} ${boardNotes.some(n => cardState(n) === 'replied') ? 'replied' : ''}`;
     chip.replaceChildren(h('span', { html: icons.note }), String(boardNotes.length));
-    chip.title = `About the whole board:\n${boardNotes.map(n => `#${num(n)} ${n.text.slice(0, 80)}`).join('\n')}`;
-    chip.onclick = () => openNote(boardNotes.find(n => noteState(n) === 'replied') || boardNotes[0]);
+    chip.title = `About the whole film:\n${boardNotes.map(n => `#${num(n)} ${n.text.slice(0, 80)}`).join('\n')}`;
+    chip.onclick = () => actions.openNote(boardNotes.find(n => cardState(n) === 'replied') || boardNotes[0]);
   }
 
 }
 const who = n => (n.author === 'you' ? 'var(--you)' : 'var(--claude)');
-// the note's status as a class: unsent (your draft), open (sent), read, working, replied, resolved
-const noteState = n => ({ draft: 'unsent', sent: 'open', agent: 'open', done: 'resolved' })[noteStatus(n).key] || noteStatus(n).key;
+// A note card's look on the timeline: unsent (your draft), open (sent), read, working, replied or resolved.
+const cardState = n => { const s = noteState(n); return { draft: 'unsent', sent: 'open', agent: 'open', done: 'resolved' }[s] || s; };
+const cardText = n => [n.render && `Render ${renderLabel(n)}`, n.text.replace(/\s+/g, ' ')].filter(Boolean).join(' · ')
+  || n.markup?.marks.map(m => m.text).filter(Boolean).join(' · ') || n.files?.map(f => f.name).join(', ') || '';
+const cardFlags = st => [
+  st === 'replied' && h('span.nflag', { html: icons.reply, title: 'Claude replied' }),
+  st === 'read' && h('span.nflag.read', { html: icons.check, title: 'Claude has read it' }),
+  st === 'working' && h('span.nflag.working', { title: 'Claude is working on it' }),
+];
+
+// Notes on the soundtrack: a card at their moment in the Audio lane, and a chip in its head for those
+// about the whole soundtrack.
+function renderSoundNotes() {
+  if (!S.board) return;
+  const b = S.board;
+  const num = n => String(b.notes.indexOf(n) + 1);
+  const shown = b.notes.filter(n => n.soundtrack && (!n.resolved || S.sel.note === n.id));
+  const timed = shown.filter(n => n.at != null).sort((p, q) => p.at - q.at);
+  soundLane.replaceChildren(...timed.flatMap((n, i) => {
+    const x = xOf(n.at), next = timed[i + 1];
+    const sel = S.sel.note === n.id, st = cardState(n);
+    return [
+      h('div.nline.snline', { class: sel ? 'sel' : '', style: { left: x + 'px', '--pc': who(n) } }),
+      h('div.ncard.frame.snote', {
+        class: `${st} ${sel ? 'sel' : ''}`,
+        style: { left: x - 9 + 'px', width: clamp(next ? xOf(next.at) - x - 4 : 240, 26, 240) + 'px', '--pc': who(n) },
+        title: `#${num(n)} ${authorName(n.author)} · the soundtrack at ${tc(n.at, b.fps)} · ${noteStatus(n).label}\n${n.text}`,
+        onpointerdown: e => e.stopPropagation(),
+        onclick: () => actions.openNote(n),
+      }, h('i.ndot'), h('b', `#${num(n)}`), h('span.ntxt', cardText(n)), ...cardFlags(st)),
+    ];
+  }));
+  const whole = shown.filter(n => n.at == null && !n.resolved);
+  const chip = $('#soundNotes');
+  chip.hidden = !whole.length;
+  if (whole.length) {
+    chip.className = `head-board ${whole.some(n => cardState(n) === 'unsent') ? 'unsent' : ''} ${whole.some(n => cardState(n) === 'replied') ? 'replied' : ''}`;
+    chip.replaceChildren(h('span', { html: icons.note }), String(whole.length));
+    chip.title = `About the whole soundtrack:\n${whole.map(n => `#${num(n)} ${n.text.slice(0, 80)}`).join('\n')}`;
+    chip.onclick = () => actions.openNote(whole.find(n => cardState(n) === 'replied') || whole[0]);
+  }
+}
 
 function renderMarkers() {
   if (!S.board) return;
@@ -447,6 +503,7 @@ function placePlayhead() {
 function renderAll() {
   sizeContent();
   renderNotes();
+  renderSoundNotes();
   renderClips();
   renderMarkers();
   renderAudioLabel();
@@ -468,7 +525,7 @@ on('board', e => {
   renderAll();
   if (e?.batches) scheduleGlowCleanup();
 });
-on('select', () => { renderNotes(); renderClips(); });
+on('select', () => { renderNotes(); renderSoundNotes(); renderClips(); });
 let workingKey = '';
 on('presence', () => {
   const say = activeSay();
@@ -658,7 +715,7 @@ function startTrim(e, clipEl) {
     const r = clipEl.getBoundingClientRect();
     tip.style.left = r.right + 'px';
     tip.style.top = r.top + 'px';
-    const beats = b.bpm ? ` · ${+(d / (60 / b.bpm)).toFixed(2)} beats` : '';
+    const beats = b.bpm ? ` · ${plural(+(d / (60 / b.bpm)).toFixed(2), 'beat')}` : '';
     tip.textContent = `${secs(d)} · ${Math.round(d * b.fps)}f${beats}${roll ? ` | next ${secs(dn)}` : ''}`;
   };
   move(e);
@@ -714,9 +771,10 @@ scroll.addEventListener('contextmenu', e => {
       { label: 'Duplicate', icon: 'copy', key: '⌘D', onclick: () => actions.duplicate(id) },
       canSplit && { label: 'Split at playhead', icon: 'split', key: 'S', onclick: () => actions.split() },
       { label: 'Add a still or clip…', icon: 'upload', onclick: () => actions.pickFile({ scene: id }) },
+      { label: 'Ask Claude to render it…', icon: 'render', onclick: () => openRender({ scene: id }) },
       '-',
       { head: 'Status' },
-      ...STATUSES.map(st => ({ label: st[0].toUpperCase() + st.slice(1), dot: STATUS_COLOR[st], cls: s.status === st ? 'cur' : '', onclick: () => commit([{ op: 'scene.set', id, fields: { status: st } }]) })),
+      ...STATUSES.map(st => ({ label: st[0].toUpperCase() + st.slice(1), dot: STATUS_COLOR[st], cls: s.status === st ? 'cur checked' : '', onclick: () => commit([{ op: 'scene.set', id, fields: { status: st } }]) })),
       '-',
       { label: 'Delete scene', icon: 'trash', key: '⌫', danger: true, onclick: () => actions.remove(id) },
     ].filter(Boolean));
@@ -727,6 +785,15 @@ scroll.addEventListener('contextmenu', e => {
         if (label) commit([{ op: 'marker.add', marker: { t: snapFrame(S.board, Math.max(0, t)), label } }]);
       } },
     ]);
+  } else if (e.clientY - scroll.getBoundingClientRect().top >= Y.audio - 3) {
+    const at = snapFrame(S.board, clamp(t, 0, S.board.audio?.duration ?? 0));
+    menu(e.clientX, e.clientY, [
+      S.board.audio && { label: `Note on the soundtrack at ${tc(at, S.board.fps)}`, icon: 'note', onclick: () => noteOnSoundtrack(at) },
+      S.board.audio && { label: 'Note on the whole soundtrack', icon: 'wave', onclick: () => noteOnSoundtrack() },
+      S.board.audio && '-',
+      { label: S.board.audio ? 'Replace soundtrack…' : 'Add soundtrack…', icon: 'wave', onclick: () => actions.pickFile({ audio: true }) },
+      S.board.audio && { label: 'Remove soundtrack', icon: 'trash', danger: true, onclick: () => commit([{ op: 'audio.set', audio: null }]) },
+    ].filter(Boolean));
   } else {
     menu(e.clientX, e.clientY, [
       { label: 'New scene at the end', icon: 'plus', onclick: () => actions.addScene({ at: 'end' }) },

@@ -2,14 +2,16 @@
 // (holding its last frame if the scene runs longer), a still sits still, and a scene with no
 // render yet shows its storyboard card. Notes pinned on the frame float on top.
 
-import { S, on, emit, here, total, mediaUrl, commit, select, upload, sceneRange, sceneColor } from './store.js';
+import { S, on, emit, here, total, mediaUrl, select, upload, sceneRange, sceneColor } from './store.js';
 import { RUNNER } from '/lib/sketch-runtime.js';
-import { activeRender, layout, noteTime, kindName, sketchCanvas, STATUSES, COLORS } from '/lib/ops.js';
-import { $, h, tc, parseTc, clamp, ask, toast, secs } from './util.js';
+import { activeRender, sketchCanvas, parseTimecode } from '/lib/ops.js';
+import { $, h, tc, clamp, secs } from './util.js';
 import { icons } from './icons.js';
 import { toggle, seek, end, pause } from './player.js';
 import { marksOverlay } from './annotate.js';
 import { inCinema } from './screen.js';
+import { actions } from './actions.js';
+import { handOff } from './handoff.js';
 
 const frame = $('#frame'), viewer = $('#viewer');
 const cardLayer = $('#cardLayer'), still = $('#still'), videos = $('#videos'), endLayer = $('#endLayer'), codeFrame = $('#codeFrame');
@@ -21,8 +23,16 @@ export const STATUS_COLOR = { idea: 'var(--st-idea)', draft: 'var(--st-draft)', 
 export { sceneColor };
 
 // A short label for a version: its length for clips, otherwise what it is.
-export const versionLabel = r =>
-  r.kind === 'code' ? 'code' : r.kind === 'video' ? `${r.sketch ? 'sketch · ' : ''}${secs(r.duration)}` : r.sketch ? 'sketch' : 'still';
+// On a panel's picture: a clip whose length isn't the scene's (the scene's own length is under the panel).
+export const versionLabel = (r, s) => (r.kind === 'video' && Math.abs(r.duration - s.duration) >= 0.05 ? `${secs(r.duration)} clip` : '');
+// The quality a version was rendered at, when whoever made it said (its meta's quality and samples):
+// "final, 64 samples". Empty when nobody did.
+export const versionQuality = r => {
+  const q = r.meta?.quality, n = Math.round(+r.meta?.samples || 0);
+  return [q, n > 0 && `${n} sample${n === 1 ? '' : 's'}`].filter(Boolean).join(', ');
+};
+// What a version is, in a word, for a panel on the wall: a sketch, or the quality it was rendered at.
+export const versionKind = r => (r.kind === 'code' ? 'code sketch' : r.sketch || r.kind === 'sketch' ? 'sketch' : r.meta?.quality || '');
 
 // ---------------------------------------------------------------- code sketches
 // The code runs in a sandboxed iframe (scripts only, no access to this page or the API), built from
@@ -156,7 +166,12 @@ function update() {
   if (!b.scenes.length) {
     setLayer('end');
     if (shown.key !== 'empty') {
-      endLayer.replaceChildren(h('div.empty-board', h('div', h('b', 'An empty board'), 'Add a scene below, drop a clip on the timeline,', h('br'), 'or ask Claude to run ', h('code', 'sb add <title>'))));
+      endLayer.replaceChildren(h('div.empty-board',
+        h('div', h('b', 'An empty board'), 'Claude lays the film out here, or you can start it yourself.'),
+        h('div.empty-actions',
+          h('button.text-btn.primary', { onclick: () => handOff() }, h('span', { html: icons.spark, style: { display: 'inline-grid' } }), 'Hand to Claude'),
+          h('button.text-btn', { onclick: () => actions.addScene() }, 'Add a scene')),
+        h('div.empty-hint', 'or drop clips onto the timeline')));
       shown.key = 'empty';
     }
     chip.hidden = true;
@@ -248,12 +263,6 @@ function preloadNext(i) {
 
 let pinsKey = '';
 
-function openNote(n) {
-  S.tab = 'notes';
-  select(n.scene, { note: n.id, keepTime: true });
-  if (n.at != null) seek(noteTime(S.board, n));
-}
-
 function renderPins() {
   if (!S.board) return;
   const hit = here();
@@ -274,7 +283,7 @@ function renderPins() {
     style: { left: n.pin.x * 100 + '%', top: n.pin.y * 100 + '%', '--pc': n.author === 'you' ? 'var(--you)' : 'var(--claude)' },
     title: n.text,
     onpointerdown: e => e.stopPropagation(),
-    onclick: e => { e.stopPropagation(); openNote(n); },
+    onclick: e => { e.stopPropagation(); actions.openNote(n); },
   }, h('div.dot', num(n))));
   for (const n of marked) pins.push(marksOverlay(n, frame.clientWidth, frame.clientHeight));
   pinsEl.replaceChildren(...pins);
@@ -282,7 +291,7 @@ function renderPins() {
 
 // Double-click the picture to mark up that frame (full screen too). Watching full screen, a click
 // plays or pauses.
-viewer.addEventListener('dblclick', e => { if (!e.target.closest('.pins')) emit('annotate'); });
+viewer.addEventListener('dblclick', e => { if (!e.target.closest('.pins, button')) emit('annotate'); });
 viewer.addEventListener('click', () => { if (inCinema()) toggle(); });
 
 // Drop a file on the monitor: a new version of the scene on screen.
@@ -315,7 +324,7 @@ tcInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') { e.preventDefault(); tcInput.blur(); }
   if (e.key !== 'Enter') return;
   e.preventDefault();
-  const t = parseTc(tcInput.value, S.board.fps, S.t);
+  const t = parseTimecode(tcInput.value, S.board.fps, S.t);
   if (t == null) {
     tcInput.classList.remove('bad');
     void tcInput.offsetWidth;
@@ -350,7 +359,6 @@ on('play', () => { playBtn.innerHTML = S.playing ? icons.pause : icons.play; pla
 on('time', () => { update(); transport(); renderPins(); });
 on('board', () => { fit(); update(); transport(); renderPins(); });
 on('select', renderPins);
-on('draft-pin', renderPins);
 on('play', renderPins);
 on('open', () => {
   for (const v of cache.values()) v.remove();

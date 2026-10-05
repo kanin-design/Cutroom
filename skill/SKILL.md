@@ -19,7 +19,9 @@ curl -sf http://127.0.0.1:8840/agent || { ~/dev/storyboard/sb start && curl -sf 
   - Keep the board current without being asked: fill in its fields, put every new render on it right away with
     a caption and the command that made it, and keep one board per film. Reading the board lists what's missing.
 - **For detail, fetch one topic** (`GET /agent/help/<topic>`) when you need it, never the whole manual.
-- **The first time you work on a board in a conversation,** end that reply with its link on its own line:
-  `Storyboard: http://127.0.0.1:8840/#<board>`.
+- **Always end with the board's clickable link,** on its own line, in every reply that delivers or reports work on a
+  film, not only the first: `Storyboard: http://127.0.0.1:8840/#<board>`. Work without a board (a sketch, a test, a
+  reel in a temp folder) gets one first, so there is always a link to give. (The user, 2026-10-05: "give clickable
+  link to storyboard always".)
 - **If the server won't start,** use `~/dev/storyboard/sb` (`sb help`). It works on the board files
   directly, except `wait`, `say` and `focus`. Tell the user the server is down.

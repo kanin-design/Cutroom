@@ -1,6 +1,6 @@
 // Editing commands shared by the keyboard, menus and buttons.
 
-import { S, emit, commit, select, here, sceneRange, upload, scene } from './store.js';
+import { S, emit, commit, select, here, upload, scene } from './store.js';
 import { snapFrame, defaultDuration, layout, noteTime } from '/lib/ops.js';
 import { toast } from './util.js';
 import { play, pause, seek } from './player.js';
@@ -75,6 +75,16 @@ export const actions = {
     }
   },
 
+  // Open a note in the Notes panel and put the playhead on what it's about: its frame, or the start
+  // of its scene. A note about the whole film leaves the playhead where it is.
+  openNote(n) {
+    emit('panel');
+    S.tab = 'notes';
+    select(n.scene, { note: n.id, keepTime: true });
+    const t = noteTime(S.board, n);
+    if (t != null) seek(t);
+  },
+
   // The open notes on the timeline, in time order (a note about a whole scene sits at its start):
   // jump to the next or previous one, from the selected note or else from the playhead.
   nextNote(dir) {
@@ -82,7 +92,7 @@ export const actions = {
     if (!b?.scenes.length) return;
     const list = b.notes
       .filter(n => n.scene && (!n.resolved || n.id === S.sel.note))
-      .map(n => ({ n, t: n.at != null ? noteTime(b, n) : sceneRange(n.scene).start }))
+      .map(n => ({ n, t: noteTime(b, n) }))
       .filter(x => x.t != null)
       .sort((p, q) => p.t - q.t);
     if (!list.length) return toast('No open notes on the timeline');
@@ -91,9 +101,7 @@ export const actions = {
     const pick = i >= 0 ? list[i + dir] : dir > 0 ? list.find(x => x.t > S.t + eps) : list.findLast(x => x.t < S.t - eps);
     if (!pick) return toast(dir > 0 ? 'That was the last note' : 'That was the first note');
     if (S.playing) pause();
-    S.tab = 'notes';
-    select(pick.n.scene, { note: pick.n.id, keepTime: true });
-    seek(pick.t);
+    actions.openNote(pick.n);
   },
 
   step(frames) {

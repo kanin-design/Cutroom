@@ -1,6 +1,6 @@
 // Full screen, two ways. The button in the top bar puts the whole editor on the screen, like an app;
 // in Chrome, Esc then stays with the editor (hold it to leave full screen). Full-screen playback
-// (⇧F, or double-click the picture) shows the picture alone, for watching the cut.
+// (⇧F, or the button under the picture) shows the picture alone, for watching the cut.
 
 import { S, on, here } from './store.js';
 import { $, h, tc, toast } from './util.js';
@@ -24,7 +24,7 @@ async function enterFull(keepEsc) {
   return true;
 }
 
-export async function toggleFullScreen() {
+async function toggleFullScreen() {
   if (isFull()) {
     cinemaOwnsScreen = false;
     return document.exitFullscreen().catch(() => {});
@@ -82,3 +82,4 @@ document.addEventListener('fullscreenchange', () => {
   }
 });
 btn.addEventListener('click', toggleFullScreen);
+$('#tFull').addEventListener('click', () => setCinema(true));
