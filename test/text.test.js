@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { newBoard, applyOps } from '../lib/ops.js';
 import { boardText, sceneText, notesText } from '../lib/text.js';
+import { sheetPages } from '../lib/sheet.js';
 
 const ctx = { author: 'claude', now: '2026-10-01T12:00:00.000Z' };
 const apply = (b, ops, c = ctx) => applyOps(b, ops, c).board;
@@ -43,6 +44,32 @@ test('a scene lists its versions with the command that made them', () => {
   const t = sceneText(board(), 's2', { slug: 'text-test' });
   assert.match(t, /▸ r1 · still · by claude · “v1” · made with: node render\.js clip/);
   assert.match(t, /## Notes on s2/);
+});
+
+test('the board keeps render lines short and a long treatment to its outline', () => {
+  const long = 'x'.repeat(120);
+  let b = apply(board(), [{ op: 'render.set', scene: 's2', id: 'r1', fields: { caption: long } }]);
+  const t = boardText(b, { slug: 'text-test', dir: '/boards/text-test' });
+  assert.match(t, /render: r1 · still · by claude · “x{79}…”\n/);
+  assert.doesNotMatch(t, /made with|poster /, 'the scene\'s own page has those');
+  assert.match(sceneText(b, 's2', { slug: 'text-test', dir: '/boards/text-test' }), /“x{120}” · made with: node render\.js clip · poster \/boards\/text-test\/media\/renders\/a\.png/);
+
+  const treatment = `The film in a line.\n\n## 1. The idea\n${'words '.repeat(400)}\n\n## 2. The shape\nThree acts.`;
+  b = apply(b, [{ op: 'board.set', fields: { treatment } }]);
+  const short = boardText(b, { slug: 'text-test' });
+  assert.match(short, /## Treatment \(2,465 characters; in full: GET \/agent\/boards\/text-test\/treatment\)\nThe film in a line\.\nIts sections: 1\. The idea · 2\. The shape$/);
+  assert.ok(boardText(b, { slug: 'text-test', treatment: true }).endsWith(treatment));
+  b = apply(b, [{ op: 'board.set', fields: { treatment: 'Short and whole.' } }]);
+  assert.match(boardText(b, { slug: 'text-test' }), /## Treatment\nShort and whole\.$/);
+});
+
+test('a long film\'s contact sheet comes in even pages a model can still read', () => {
+  const film = (n, w = 1920, h = 1080) => ({ width: w, height: h, scenes: Array.from({ length: n }, (_, i) => ({ id: `s${i + 1}` })) });
+  assert.deepEqual(sheetPages(film(16)), { pages: 1, size: 16 });
+  assert.deepEqual(sheetPages(film(20)), { pages: 2, size: 12 });
+  assert.deepEqual(sheetPages(film(38)), { pages: 3, size: 16 });
+  assert.deepEqual(sheetPages(film(18, 1080, 1920)), { pages: 1, size: 18 });
+  assert.deepEqual(sheetPages(film(19, 1080, 1920)), { pages: 2, size: 12 });
 });
 
 test('notes: open ones, and unsent ones only when asked', () => {

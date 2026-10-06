@@ -15,9 +15,15 @@ curl -sf http://127.0.0.1:8840/agent || { ~/dev/storyboard/sb start && curl -sf 
 
 - **Follow its rules.** Above all:
   - When idle, keep `wait` running as a background task, and start it again after handling what it returns.
-    It's the only way the user's notes reach you.
+    It's the only way the user's notes reach you. Don't check on it or read its output file while it runs: it prints
+    nothing until it returns, and you're told when it does.
   - Keep the board current without being asked: fill in its fields, put every new render on it right away with
     a caption and the command that made it, and keep one board per film. Reading the board lists what's missing.
+  - **A finished scene goes on the board as a preview.** When you finish a scene (built it, or changed it for a
+    note), render that scene at preview quality (the board's draft quality, at 720p) and put it on its scene right
+    away, without being asked, so the board always plays the film as it is now. Render only the scenes you changed.
+    A final, or a bigger size, only when the user asks (a render request). Ideas stay sketches until the user agrees
+    on them.
 - **For detail, fetch one topic** (`GET /agent/help/<topic>`) when you need it, never the whole manual.
 - **Always end with the board's clickable link,** on its own line, in every reply that delivers or reports work on a
   film, not only the first: `Storyboard: http://127.0.0.1:8840/#<board>`. Work without a board (a sketch, a test, a

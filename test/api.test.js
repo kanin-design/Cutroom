@@ -50,6 +50,8 @@ test('an agent makes a board, fills it in and is told what is missing', async ()
   assert.equal(ops.status, 200);
   assert.deepEqual(ops.body.created, { scenes: ['s1', 's2'] });
   assert.match(ops.body.todo, /board owner, project, brief, treatment/);
+  assert.equal(ops.body.inverse, undefined, 'the undo stays in the log');
+  assert.ok((await call('GET', '/agent/boards/api-test/log?format=json')).body.entries.at(-1).inverse.length);
 
   const text = await call('GET', '/agent/boards/api-test');
   assert.match(text.body, /TO FILL IN/);
@@ -278,6 +280,14 @@ test('the contact sheet draws', { skip: !fs.existsSync('/usr/bin/swiftc') && 'ne
   const r = await call('GET', '/agent/boards/api-test/sheet?format=path');
   assert.equal(r.status, 200);
   assert.ok(fs.existsSync(r.body.trim()));
+  // A long film's sheet comes in pages: every page's path, one a line, or one page as an image.
+  await call('POST', '/agent/boards', { title: 'Long sheet' });
+  await call('POST', '/agent/boards/long-sheet/ops', { ops: Array.from({ length: 17 }, (_, i) => ({ op: 'scene.add', scene: { title: `Shot ${i + 1}`, duration: 1 } })) });
+  const pages = (await call('GET', '/agent/boards/long-sheet/sheet?format=path')).body.trim().split('\n');
+  assert.equal(pages.length, 2);
+  assert.ok(pages.every(f => /-p[12]\.jpg$/.test(f) && fs.existsSync(f)), pages.join('\n'));
+  assert.equal((await call('GET', '/agent/boards/long-sheet/sheet?page=2&format=path')).body.trim(), pages[1]);
+  assert.equal((await call('GET', '/agent/boards/long-sheet/sheet?page=3')).status, 400);
 });
 
 test('boards come in a shape, and the editor can hand one to a Claude session', async () => {
