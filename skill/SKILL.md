@@ -19,8 +19,14 @@ curl -sf http://127.0.0.1:8840/agent || { ~/dev/storyboard/sb start && curl -sf 
     nothing until it returns, and you're told when it does.
   - Keep the board current without being asked: fill in its fields, put every new render on it right away with
     a caption and the command that made it, and keep one board per film. Reading the board lists what's missing.
+  - **Every scene is its own little movie.** Each scene says how it is made in its own `render` (ray traced,
+    raster, an edit of 4K footage, a screen capture…: its type, what draft and final mean for it, the command that
+    renders it, its own frame rate), so one film mixes them; the board's `render` is only the default. Set it on a
+    scene as soon as you know (`sb set s3 render.type=raytrace render.final="64 samples a pixel" render.cmd="…"`).
+    The whole film is the cut of its scenes: render the scenes that need it, each its own way, then `sb cut --size
+    4k --quality final` joins their renders, conformed to the film.
   - **A finished scene goes on the board as a preview.** When you finish a scene (built it, or changed it for a
-    note), render that scene at preview quality (the board's draft quality, at 720p) and put it on its scene right
+    note), render that scene at preview quality (its own draft quality, at 720p) and put it on its scene right
     away, without being asked, so the board always plays the film as it is now. Render only the scenes you changed.
     A final, or a bigger size, only when the user asks (a render request). Ideas stay sketches until the user agrees
     on them.

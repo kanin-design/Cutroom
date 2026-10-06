@@ -3,7 +3,7 @@
 // scrolling gives trackpad momentum; pinch (or ⌘/Ctrl + wheel) zooms around the pointer.
 
 import { S, on, commit, select, sceneRange, mediaUrl, upload, here, activeSay } from './store.js';
-import { layout, activeRender, totalDuration, snapFrame, noteTime, noteState, plural, STATUSES, renderLabel } from '/lib/ops.js';
+import { layout, activeRender, totalDuration, snapFrame, noteTime, noteState, plural, STATUSES, renderLabel, sceneRender, RENDER_TYPES, RENDER_TAGS } from '/lib/ops.js';
 import { $, h, clamp, secs, tc, menu, ask, authorName } from './util.js';
 import { icons } from './icons.js';
 import { seek, end, pause } from './player.js';
@@ -263,7 +263,7 @@ function renderClips() {
   const say = activeSay();
   const els = layout(b).map(({ scene: s, index, start }) => {
     const w = Math.max(3, s.duration * S.pps - 2);
-    const r = activeRender(s);
+    const r = activeRender(s), how = sceneRender(b, s);
     const num = String(index + 1).padStart(2, '0');
     const el = h('div.clip', {
       class: `${r ? '' : 'plain'} ${S.sel.scene === s.id ? 'sel' : ''} ${w < 36 ? 'tiny' : w < 110 ? 'small' : ''} ${clipFit(w, num, s.title, secs(s.duration))} ${now - (S.glow.get(s.id) || -1e9) < 2600 ? 'glow' : ''}`,
@@ -303,6 +303,7 @@ function renderClips() {
       h('div.foot',
         h('i.sdot', { style: { '--sc': STATUS_COLOR[s.status] }, title: s.status }),
         h('span', secs(s.duration)),
+        how && h('span.ctype', { title: `${RENDER_TYPES[how.type].label}${how.own ? '' : ' (as the film)'}` }, RENDER_TAGS[how.type]),
       ),
       h('div.handle', { title: 'Drag to change the duration · Alt: roll the cut' }),
     ].filter(Boolean)); // append() would print a null as text

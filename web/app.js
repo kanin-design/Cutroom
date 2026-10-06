@@ -8,7 +8,7 @@ import { setCinema, inCinema } from './screen.js';
 import { fitAll, zoomBy } from './timeline.js';
 import { setView } from './grid.js';
 import { actions } from './actions.js';
-import { plural, noteState, forYou, sceneStart, aspectName, aspectFrame, RENDER_TYPES, RENDER_QUALITIES, ASPECTS } from '/lib/ops.js';
+import { plural, noteState, forYou, sceneStart, aspectName, aspectFrame, RENDER_TYPES, RENDER_QUALITIES, ASPECTS, filmRenderTypes, sceneRender } from '/lib/ops.js';
 import { focusComposer, setFrame, sendAll, annotateHere, waiting } from './composer.js';
 import { openRender } from './render.js';
 import { handOffWhenOpen, claudeState, reachable, claudeAct, presenceCard } from './handoff.js';
@@ -28,8 +28,9 @@ on('board', () => {
   boardTitle.textContent = b.title;
   document.title = `${b.title} · Cutroom`;
   boardMeta.textContent = [aspectName(b), `${+b.fps} fps`, b.bpm && `${+b.bpm} bpm`, plural(b.scenes.length, 'scene'), tc(end(), b.fps), b.archived && 'archived'].filter(Boolean).join(' · ');
-  renderKind.hidden = !b.render;
-  if (b.render) renderKind.textContent = b.render.type.map(t => RENDER_TYPES[t].label).join(' · ');
+  const types = filmRenderTypes(b);
+  renderKind.hidden = !types.length;
+  if (types.length) renderKind.textContent = types.map(t => RENDER_TYPES[t].label).join(' · ');
   $('#rulerSeg').hidden = !b.bpm; // without a tempo the ruler counts time, and the choice waits for a board with one
 });
 
@@ -67,15 +68,15 @@ presence.card = presenceCard;
 presence.addEventListener('click', e => { if (!e.target.closest('.presence-scene')) claudeAct(); });
 presence.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); claudeAct(); } });
 boardMeta.addEventListener('click', () => openBoardSettings());
-// How the film renders, beside its title once Claude has set it: what that is and what draft and final
-// mean, on hover; the film pane, on click.
+// How the film is made, beside its title: the ways its scenes are made (each scene is its own movie), with
+// which scenes each, on hover; the film pane, on click.
 renderKind.card = () => {
-  const r = S.board?.render;
-  if (!r) return null;
+  const b = S.board;
+  if (!b) return null;
+  const nums = t => b.scenes.map((s, i) => (sceneRender(b, s)?.type === t ? String(i + 1).padStart(2, '0') : null)).filter(Boolean);
   return [
-    r.type.map(t => [h('div.tip-head', RENDER_TYPES[t].label), h('div.tip-text', RENDER_TYPES[t].what)]),
-    RENDER_QUALITIES.some(q => r[q]) && h('div.tip-rows', RENDER_QUALITIES.filter(q => r[q]).map(q => [h('span', q === 'draft' ? 'Draft' : 'Final'), h('span', r[q])])),
-    h('div.tip-sub', 'Set by Claude'),
+    filmRenderTypes(b).map(t => [h('div.tip-head', RENDER_TYPES[t].label, nums(t).length ? h('span', { style: { fontWeight: 400, opacity: 0.6, marginLeft: '6px' } }, `scenes ${nums(t).join(', ')}`) : null), h('div.tip-text', RENDER_TYPES[t].what)]),
+    h('div.tip-sub', 'Each scene is its own movie, made its own way; the cut joins them'),
   ];
 };
 renderKind.addEventListener('click', () => openFilm());

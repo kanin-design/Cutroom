@@ -333,3 +333,34 @@ test('agents and browsers get different things at /', async () => {
   assert.equal(manual.status, 200);
   assert.match(manual.body, /`canvas` is 1600×\d+: 1600 wide/);
 });
+
+test('the cut: each scene from its own render, conformed to the film; or what is missing', async () => {
+  assert.equal((await call('POST', '/agent/boards', { title: 'Cut test', fps: 30 })).status, 200);
+  await call('POST', '/agent/boards/cut-test/ops', { ops: [
+    { op: 'scene.add', scene: { title: 'Rays', duration: 1, render: { type: 'raytrace', final: '64 samples a pixel' } } },
+    { op: 'scene.add', scene: { title: 'Card', duration: 0.5, render: { type: '2d' } } },
+    { op: 'scene.add', scene: { title: 'Glass', duration: 0.5, render: { type: 'pathtrace', cmd: 'node glass.js' } } },
+  ] });
+  const make = (name, args) => { const f = path.join(HOME, name); execFileSync('ffmpeg', ['-y', '-v', 'error', ...args, f]); return f; };
+  // A final clip at 24 fps (the film is 30), a final still, and only a small draft for the third.
+  const clip = make('rays.mp4', ['-f', 'lavfi', '-i', 'testsrc=s=1280x720:r=24:d=0.8', '-pix_fmt', 'yuv420p']);
+  const still = make('card.png', ['-f', 'lavfi', '-i', 'color=c=blue:s=1280x720', '-frames:v', '1']);
+  const draft = make('glass.mp4', ['-f', 'lavfi', '-i', 'testsrc=s=640x360:r=30:d=0.5', '-pix_fmt', 'yuv420p']);
+  for (const [scene, p, quality] of [['s1', clip, 'final'], ['s2', still, 'final'], ['s3', draft, 'draft']]) {
+    const r = await call('POST', '/agent/boards/cut-test/renders', { scene, path: p, meta: { quality } });
+    assert.equal(r.status, 200, JSON.stringify(r.body));
+  }
+  const plan = await call('GET', '/agent/boards/cut-test/cut?size=720p&quality=final&plan=1');
+  assert.match(plan.body, /2 of 3 scenes have a render that fits/);
+  assert.match(plan.body, /03 Glass \(s3\): MISSING \(has 640×360 draft clip\)\. Render it path traced; made with: node glass\.js/);
+  assert.equal((await call('GET', '/agent/boards/cut-test/cut?size=720p&quality=final')).status, 409);
+  // A partial cut lets the draft stand in; the 24 fps clip is conformed to the film's 30, the short one holds.
+  const cut = await call('GET', '/agent/boards/cut-test/cut?size=720p&quality=final&partial=1&format=json');
+  assert.equal(cut.status, 200, JSON.stringify(cut.body));
+  const v = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-count_frames', '-select_streams', 'v', '-show_entries', 'stream=width,height,nb_read_frames,r_frame_rate,color_primaries', '-of', 'json', cut.body.path]).toString()).streams[0];
+  assert.deepEqual([v.width, v.height, v.r_frame_rate, +v.nb_read_frames, v.color_primaries], [1280, 720, '30/1', 60, 'bt709']);
+  // The editor asks where it stands, and gets the same file.
+  const st = await call('GET', '/api/boards/cut-test/cut?size=720p&quality=final&partial=1');
+  assert.equal(st.body.state, 'done', JSON.stringify(st.body));
+  assert.equal(st.body.ready, 2);
+});

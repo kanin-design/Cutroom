@@ -69,10 +69,15 @@ reverted.
 ### 4. You decide what gets rendered
 
 Rendering is the expensive part, so it's your call. Ask for the whole film, one scene or one frame, at
-4K, 1080p or 720p, as a draft or the final. What draft and final mean depends on how the film is made, so
-Claude records the film's render type (2D, three.js, ray marched, ray traced, path traced, an edit, a
-screen capture) and what each quality is. A ray-marched film's draft is 8 samples a pixel, grainy but fine
-for checking motion; its final is 64. You see it beside the title, and in every render request.
+4K, 1080p or 720p, as a draft or the final.
+
+Every scene is its own little movie, made its own way: one ray traced, the next an edit of a 4K film, the
+next a screen capture or a three.js scene, each at its own settings and frame rate. Pick how a scene is made
+in its Render as (add a scene and make it ray traced), and Claude records what draft and final mean for it
+and the command that renders it. A ray-traced scene's draft is 8 samples a pixel, grainy but fine for
+checking motion; its final is 64. The whole film is the cut of its scenes: Claude renders the scenes that
+need it, each its own way, and the cut takes each scene's own render, fits it into the film's frame,
+conforms it to the film's frame rate and joins them with the soundtrack. A 4K final is the master.
 
 ![The render request, and the film's render type with what draft and final mean](docs/render.jpg)
 
@@ -125,15 +130,17 @@ editor for every shortcut.
 <details>
 <summary><b>Every panel and control</b></summary>
 
-- **Top bar.** The film's title, how it's rendered once Claude has decided (Ray marched, say; hover it for
-  what that means and what draft and final mean, click it for the film), and its shape, frame rate,
-  tempo, scenes and length.
+- **Top bar.** The film's title, the ways its scenes are made (Raster · Edit · Ray traced, say; hover it for
+  what each is and which scenes, click it for the film), and its shape, frame rate, tempo, scenes and length.
 - **Edit's side pane: the scene.** The scene under the playhead (it says so, and follows the playhead as
   the cut plays, except while you type in it). Click a scene to go to it; it stays until the playhead moves
   on to another. Its status, the version
-  playing and the quality it was rendered at, its length and colour, what we see and hear, and every
-  version.
-- **Board's side pane: the film.** How it's rendered; where it stands (its scenes by status, its length,
+  playing and the quality it was rendered at, its length and colour, how it's made (Render as: pick 2D,
+  raster, ray marched, ray traced, path traced, an edit or a screen capture, or as the film; with what draft
+  and final mean for it, the command that renders it, its frame rate and its footage), what we see and
+  hear, and every version. Each clip on the timeline carries a tag for how it's made (RT, EDIT, RAS…).
+- **Board's side pane: the film.** How it's made, scene by scene (the ways, with how many scenes each, and
+  the default for scenes that don't say); where it stands (its scenes by status, its length,
   and the notes waiting for you); the brief; the treatment; and its settings, folded with their values
   beside them: the project folder, shape, frame rate, tempo and soundtrack.
 - **Monitor.** Plays the cut, with the soundtrack as the master clock. Scenes with a render play that
@@ -177,15 +184,18 @@ editor for every shortcut.
   - **What:** the whole film, one scene (any scene, from a list), or one frame: the frame under the
     playhead, as a still. A frame is the cheapest way to judge the look of an expensive, ray-traced film.
   - **Size:** 4K, 1080p or 720p, in the board's shape and frame rate.
-  - **Quality:** draft or final, meaning what the board's render says they mean. Before Claude has said,
-    draft is the project's quickest settings that still show the look, and final its full settings. A
+  - **Quality:** draft or final, meaning what each scene's render says they mean. Before Claude has said,
+    draft is the scene's quickest settings that still show the look, and final its full settings. A
     final 4K is the master, in 10-bit HEVC; other clips are H.264, and a frame is a PNG.
+  - **The whole film** shows which scenes already have a render that fits that size and quality, and which
+    Claude will render first, each its own way.
 
   Add anything else Claude should know. Claude says how long a render will take before starting anything
   over about ten minutes. The request goes straight to Claude and shows in Notes like any note, and the
   button carries a dot while one is open (spinning while Claude renders). Open it again to see where your
-  requests stand, or to cancel one. Or download the animatic: the current versions cut together here, in
-  a moment, with no Claude needed.
+  requests stand, or to cancel one. Or cut it now, here, with no Claude needed: the film from the scenes'
+  own renders at that size and quality (with what there is, if some scenes have none yet), or the animatic,
+  the current versions at half size in a moment.
 - **Versions.** Every still, clip or sketch on a scene is kept, oldest to newest; click one to make it
   the one that plays. A render says the quality it was made at (final, 64 samples) when Claude records
   it. Drop a file onto a scene, the monitor or the Versions list to add one, onto empty timeline for a
@@ -215,10 +225,10 @@ editor for every shortcut.
     whatever size you ask for.
   - **Board settings** (the menu, or click the shape line in the top bar) open the film pane in the
     Board view, settings unfolded.
-  - **Render:** how the film is rendered: 2D, raster (three.js), ray marched, ray traced, path traced, an
-    edit of existing clips, or a screen capture (or a mix), with what draft and final mean for it. Claude
-    sets it once it has decided, and keeps it true; you see it beside the title, in the film pane, and in
-    the render menu next to the quality you pick.
+  - **Render:** how the film is made, scene by scene: 2D, raster (three.js), ray marched, ray traced, path
+    traced, an edit of existing clips, or a screen capture, each scene its own way. You pick it on a scene;
+    Claude fills in what draft and final mean and the command, and sets the default for scenes that don't
+    say. You see the mix beside the title and in the film pane, and each scene's in the render menu.
 
 </details>
 
@@ -248,8 +258,12 @@ the editor.) `sb` is the same API as a command line. The API covers:
   call; set the soundtrack.
 - **Talking to you:** a status line in your top bar (optionally about one shot, with progress), and
   moving your playhead to what it's talking about. Replies and notes can carry files.
-- **How the film is rendered:** once decided, the board's render type and what draft and final mean in
-  this film (`sb board render.type=raymarch render.final="64 samples a pixel"`). Requests repeat it.
+- **How each scene is made:** every scene is its own movie: its render type, what draft and final mean for
+  it, the command that renders it, its frame rate and footage (`sb set s3 render.type=raytrace
+  render.final="64 samples a pixel" render.cmd="…"`); the board's render is the default. Requests repeat it.
+- **The cut:** the film at a size and quality from each scene's own render, fitted, conformed to the film's
+  frame rate and joined with the soundtrack (`sb cut --size 4k --quality final`; `--plan` says what's ready
+  and what's missing first).
 - **Render requests:** when you ask for a render, Claude gets a note that says exactly what to render, at
   what size, quality and encoding, and how to hand it back.
 - **Listening:** `sb wait` returns when you send notes, and rides out server restarts. A ping from the

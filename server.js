@@ -21,6 +21,7 @@ import { chrome } from './lib/codesketch.js';
 import { makeSketch, drawnStale, redrawCode } from './lib/sketch.js';
 import { watchSketches } from './lib/folder.js';
 import { exportAnimatic } from './lib/animatic.js';
+import { cutStatus, exportCut, cutReport } from './lib/cut.js';
 import { overview, boardRows, handoff } from './lib/manual.js';
 
 const argPort = process.argv.indexOf('--port');
@@ -313,6 +314,23 @@ async function api(req, res, url, [a, slug, action]) {
     } catch (e) {
       fs.rm(out, { force: true }, () => {});
       return send(res, e.status || 400, { error: e.message });
+    }
+  }
+  // The cut: the film at a size and quality from each scene's own render. Asking starts it and says where it
+  // stands (the editor asks again until it's done); ?file=1 then hands over the file.
+  if (action === 'cut') {
+    const opts = { size: url.searchParams.get('size') || '1080p', quality: url.searchParams.get('quality') || 'final', partial: url.searchParams.get('partial') === '1' };
+    try {
+      if (url.searchParams.get('file') === '1') {
+        const x = exportCut(L, store.dir(slug), opts);
+        const r = await x.job;
+        res.setHeader('Content-Disposition', `attachment; filename="${slug}-${opts.size}-${opts.quality}${opts.partial ? '-partial' : ''}.mp4"`);
+        return file(req, res, r.path);
+      }
+      if (url.searchParams.get('plan') === '1') { const { plan, ...rep } = cutReport(L.board, opts.size, opts.quality, store.dir(slug)); return send(res, 200, rep); }
+      return send(res, 200, cutStatus(L, store.dir(slug), opts));
+    } catch (e) {
+      return send(res, e.status || 500, { error: e.message });
     }
   }
   if (action === 'animatic') {

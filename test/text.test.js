@@ -93,11 +93,18 @@ test('a render request says what to render, at what size, and how to deliver it'
   assert.match(t, /n1   #1 you · RENDER REQUEST: the whole film, 4K final: 3840×2160 at 25 fps, final quality, 10-bit HEVC \(the master\)/);
   assert.match(t, /n2   #2 you · RENDER REQUEST: s1 “One”, 720p draft: 1280×720 at 25 fps, draft quality \(quick settings\), H\.264/);
   assert.match(t, /n5   #5 you · RENDER REQUEST: the frame at 0:01\.00 \(00:00:01:00 in the editor, frame 25\) in s1 “One”, 1080p final still: one 1920×1080 still, final quality, PNG/);
-  assert.match(t, /how: render exactly this, with the project's pipeline: GET \/agent\/help\/requests/);
+  assert.match(t, /how: render exactly this, each scene its own way: GET \/agent\/help\/requests/);
+  assert.match(t, /how: render exactly this, the scene its own way: GET \/agent\/help\/requests/);
+  // The whole film is the cut of its scenes: the request says which have a render that fits and which to render first.
+  assert.match(t, /the cut: 0 of 1 scenes have a render that fits; render first, each its own way: s1 \(how it is made: not set; has nothing yet\); then cut them together: sb cut --size 4k --quality final/);
   // Once the board says how it's rendered, a request says what its quality means there.
   const ray = apply(b, [{ op: 'board.set', fields: { render: { type: 'raymarch', draft: '8 samples a pixel', final: '64 samples a pixel' } } }]);
   assert.match(notesText(ray, { slug: 'requests' }), /n2   #2 you · RENDER REQUEST: s1 “One”, 720p draft: 1280×720 at 25 fps, draft quality \(ray marched, 8 samples a pixel\), H\.264/);
-  assert.match(boardText(ray, { slug: 'requests' }), /\nrender: ray marched · draft: 8 samples a pixel · final: 64 samples a pixel\n/);
+  assert.match(boardText(ray, { slug: 'requests' }), /\nrender: each scene is its own movie, made its own way \(the cut joins them\): ray marched ×1\ndefault for scenes that don't say: ray marched · draft: 8 samples a pixel · final: 64 samples a pixel\n/);
+  // A scene made its own way says so in the shot list.
+  const own = apply(ray, [{ op: 'scene.set', id: 's1', fields: { render: { type: 'raytrace', final: '64 samples a pixel', cmd: 'node rt.js' } } }]);
+  assert.match(boardText(own, { slug: 'requests' }), /\n {7}made: ray traced · final: 64 samples a pixel\n/);
+  assert.match(sceneText(own, 's1', { slug: 'requests' }), /made: ray traced · final: 64 samples a pixel · made with: node rt\.js/);
   assert.match(t, /n3   #3 you · SOUNDTRACK at 0:02\.75 \(00:00:02:19 in the editor, bar 2 beat 2\.5\)/);
   assert.match(t, /listen: \/boards\/requests\/media\/audio\/song\.wav · on screen then: GET \/agent\/boards\/requests\/frame\?note=n3/);
   assert.match(t, /n4   #4 you · WHOLE SOUNDTRACK/);

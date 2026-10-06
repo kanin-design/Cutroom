@@ -5,7 +5,7 @@
 // focus and caret are put back afterwards.
 
 import { S, on, emit, commit, select, scene, mediaUrl, sceneRange, upload, here, activeSay, hold } from './store.js';
-import { STATUSES, COLORS, ASPECTS, RENDER_TYPES, RENDER_QUALITIES, layout, noteTime, noteState, forYou, totalDuration, activeRender, findScene, kindName, renderSize, renderLabel, renderQuality, renderCodec, qualityWords, aspectName, plural } from '/lib/ops.js';
+import { STATUSES, COLORS, ASPECTS, RENDER_TYPES, RENDER_QUALITIES, sceneRender, filmRenderTypes, layout, noteTime, noteState, forYou, totalDuration, activeRender, findScene, kindName, renderSize, renderLabel, renderQuality, renderCodec, qualityWords, aspectName, plural } from '/lib/ops.js';
 import { $, h, secs, ago, authorName, debounce, autosize, toast, menu, closeMenu, ask, tc as tcFmt } from './util.js';
 import { icons } from './icons.js';
 import { seek } from './player.js';
@@ -233,6 +233,7 @@ function scenePanel() {
         COLORS.slice(1).map(c => h('button', { class: s.color === c ? 'on' : '', style: { '--c': c }, onclick: () => s.color !== c && set({ color: c }) })),
       ),
     ),
+    renderAsSection(s, b, set, was),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Picture'), was('picture')),
       marked(bound(`picture:${s.id}`, s.picture, (v, k) => set({ picture: v }, k), { tag: 'textarea', placeholder: 'What we see — framing, action, light, motion…' }), `${s.id}.picture`),
@@ -247,6 +248,25 @@ function scenePanel() {
       h('pre.meta', Object.entries(s.meta).map(([k, v]) => `${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')),
     ),
   ];
+}
+
+// How this scene is made. Every scene is its own little movie: one is ray traced, the next an edit of 4K
+// footage. You pick the way; Claude says what draft and final mean for it and the command that renders it. The
+// cut fits every scene to the film's frame and frame rate.
+function renderAsSection(s, b, set, was) {
+  const how = sceneRender(b, s), own = !!s.render;
+  const def = b.render?.type?.length === 1 ? RENDER_TYPES[b.render.type[0]].label : null;
+  const pick = h('select.field.render-as', { 'aria-label': 'Render as', onchange: e => set({ render: e.target.value ? { type: e.target.value } : null }) },
+    h('option', { value: '', selected: !own }, def ? `As the film (${def})` : 'Not set yet'),
+    Object.entries(RENDER_TYPES).map(([k, t]) => h('option', { value: k, selected: own && s.render.type === k }, t.label)));
+  const rows = how ? [['Draft', how.draft], ['Final', how.final], ['Frame rate', how.fps && `${+how.fps} fps, conformed to ${+b.fps} in the cut`], ['Made with', how.cmd], ['Footage', how.source]].filter(([, v]) => v) : [];
+  return h('div.sec',
+    h('div.sec-head', h('span.label', 'Render as'), was('render', v => (v ? RENDER_TYPES[v.type]?.label || v.type : 'as the film'))),
+    pick,
+    h('div.render-what', how ? RENDER_TYPES[how.type].what : 'Pick how this scene is made: each scene is its own movie, and the cut joins them.'),
+    rows.length > 0 && h('div.props.wide.render-rows', rows.map(([k, v]) => [h('span.label', k), h('span.render-q', v)])),
+    how && !how.draft && !how.final && h('div.hint', 'Claude fills in what draft and final mean for it.'),
+  );
 }
 
 // What plays for this scene: which version, what it is (the quality it was rendered at, when that's
@@ -352,7 +372,7 @@ function filmPanel() {
       unsent('board.title', v => set({ title: v })) && h('div.scene-id', 'Title ', unsent('board.title', v => set({ title: v }))),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Render'), b.render && h('span.hint', 'set by Claude')),
+      h('div.sec-head', h('span.label', 'Render'), h('span.hint', 'scene by scene')),
       renderInfo(b),
     ),
     h('div.sec',
@@ -422,14 +442,19 @@ function progress(b) {
   ];
 }
 
-// How the film is rendered, as Claude set it once it had decided: shown, not edited here. Its kind (what
-// that is, on hover) and what draft and final mean in this film.
+// How the film is made: scene by scene, each its own movie, each its own way (set on the scene). The ways it
+// mixes, with how many scenes each (what each is, on hover); the default for scenes that don't say, as Claude
+// set it; and what the cut does with them.
 function renderInfo(b) {
-  if (!b.render) return h('div.hint', 'Not decided yet. Claude sets it once it has decided how the film is rendered, and what draft and final mean for it.');
+  const types = filmRenderTypes(b);
+  const n = t => b.scenes.filter(s => sceneRender(b, s)?.type === t).length, unset = b.scenes.filter(s => !sceneRender(b, s)).length;
+  const def = b.render && `${b.render.type.map(t => RENDER_TYPES[t].label).join(' · ')}${RENDER_QUALITIES.filter(q => b.render[q]).map(q => ` · ${q}: ${b.render[q]}`).join('')}`;
   return h('div.render-info',
-    h('div.render-kind', b.render.type.map(t => h('span', { 'data-tip': RENDER_TYPES[t].what }, RENDER_TYPES[t].label))),
-    RENDER_QUALITIES.some(q => b.render[q]) && h('div.props.wide',
-      RENDER_QUALITIES.filter(q => b.render[q]).map(q => [h('span.label', q === 'draft' ? 'Draft' : 'Final'), h('span.render-q', b.render[q])])));
+    types.length > 0 && b.scenes.length > 0 && h('div.render-kind', types.filter(n).map(t => h('span', { 'data-tip': RENDER_TYPES[t].what }, RENDER_TYPES[t].label, h('em', String(n(t)))))),
+    unset > 0 && b.scenes.length > 0 && h('div.hint', `${plural(unset, 'scene')} not set yet`),
+    h('div.render-q', `Each scene is its own movie, made its own way (set it on the scene). The cut fits them all to the film: ${aspectName(b)} at ${+b.fps} fps.`),
+    def && h('div.props.wide', h('span.label', 'Default'), h('span.render-q', { title: 'For scenes that don’t say how they are made (set by Claude)' }, def)),
+  );
 }
 
 // ---------------------------------------------------------------- notes

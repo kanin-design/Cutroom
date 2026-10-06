@@ -2,10 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  newBoard, applyOps, layout, locate, noteTime, noteState, sceneColors, boardGaps, forYou, timecode, parseTimecode, clock, seconds,
-  snapFrame, fitDuration, kindName, musical, createdIds, plural, renderSize, renderWords, renderTypeName, barBeat, aspectFrame, aspectName, COLORS, MARK_COLORS,
-} from '../lib/ops.js';
+import { newBoard, applyOps, layout, locate, noteTime, noteState, sceneColors, boardGaps, forYou, timecode, parseTimecode, clock, seconds, snapFrame, fitDuration, kindName, musical, createdIds, plural, renderSize, renderWords, renderTypeName, barBeat, aspectFrame, aspectName, COLORS, MARK_COLORS, sceneRender, filmRenderTypes, cutPlan, versionWords, editList } from '../lib/ops.js';
 
 const ctx = { author: 'claude', now: '2026-10-01T12:00:00.000Z' };
 const apply = (b, ops, c = ctx) => applyOps(b, ops, c).board;
@@ -239,12 +236,73 @@ test('board gaps list what is missing until it is filled in', () => {
   assert.deepEqual(boardGaps(b), []);
   // A board made without a title waits for its agent to name it.
   assert.deepEqual(boardGaps(apply(b, [{ op: 'board.set', fields: { title: '' } }]))[0], 'board title');
-  // How it's rendered is asked for once a scene has a real render, not while it has only sketches.
+  // How a scene is made is asked for once it has a real render, not while it has only sketches; a scene says
+  // it itself, or takes the film's default when the board names one way.
   b = apply(b, [{ op: 'render.add', scene: 's1', render: { file: 'media/s1-sketch.png', kind: 'image', sketch: true } }]);
   assert.deepEqual(boardGaps(b), []);
   b = apply(b, [{ op: 'render.add', scene: 's1', render: { file: 'media/s1.mp4', kind: 'video', duration: 2 } }, { op: 'scene.set', id: 's1', fields: { status: 'draft' } }]);
-  assert.deepEqual(boardGaps(b), ['board render (how the film is rendered: its type, and what draft and final mean)']);
+  assert.deepEqual(boardGaps(b), ['how it is made (its render: type, what draft and final mean, the command) on s1']);
+  assert.deepEqual(boardGaps(apply(b, [{ op: 'scene.set', id: 's1', fields: { render: { type: 'raytrace' } } }])), []);
   assert.deepEqual(boardGaps(apply(b, [{ op: 'board.set', fields: { render: { type: 'raster' } } }])), []);
+  // A board default of several ways decides nothing for a scene.
+  assert.equal(boardGaps(apply(b, [{ op: 'board.set', fields: { render: { type: ['raster', 'edit'] } } }])).length, 1);
+});
+
+test('each scene is its own movie: it says how it is made, or takes the film\'s default', () => {
+  let b = apply(sample(), [{ op: 'board.set', fields: { render: { type: 'raster', draft: '720p, no motion blur', final: 'motion blur' } } }]);
+  assert.deepEqual(sceneRender(b, b.scenes[0]), { type: 'raster', draft: '720p, no motion blur', final: 'motion blur', own: false });
+  const r = applyOps(b, [{ op: 'scene.set', id: 's1', fields: { render: { type: 'Ray traced', draft: '8 samples a pixel', final: '64 samples a pixel', cmd: 'node render.js --scene s1', fps: 24 } } }], ctx);
+  b = r.board;
+  assert.deepEqual(b.scenes[0].render, { type: 'raytrace', draft: '8 samples a pixel', final: '64 samples a pixel', cmd: 'node render.js --scene s1', fps: 24 });
+  assert.equal(r.summaries[0], 'changed s1 “One”: renders as ray traced (final: 64 samples a pixel)');
+  // Without a type, the fields given change and the rest stay; null takes one away.
+  b = apply(b, [{ op: 'scene.set', id: 's1', fields: { render: { final: '128 samples a pixel', fps: null } } }]);
+  assert.deepEqual(b.scenes[0].render, { type: 'raytrace', draft: '8 samples a pixel', final: '128 samples a pixel', cmd: 'node render.js --scene s1' });
+  // A new type starts over: what draft and final meant for the old way doesn't carry.
+  assert.deepEqual(apply(b, [{ op: 'scene.set', id: 's1', fields: { render: 'edit' } }]).scenes[0].render, { type: 'edit' });
+  // The film is made several ways now; requests say so, and a scene's own request says its own.
+  assert.deepEqual(filmRenderTypes(b), ['raytrace', 'raster']);
+  assert.match(renderWords(b, { render: { size: '4k', quality: 'final' } }), /final quality, each scene its own way \(ray traced and raster\), cut together/);
+  assert.match(renderWords(b, { scene: 's1', render: { size: '4k', quality: 'final' } }), /final quality \(ray traced, 128 samples a pixel\)/);
+  assert.match(renderWords(b, { scene: 's3', render: { size: '720p', quality: 'draft' } }), /draft quality \(raster, 720p, no motion blur\)/);
+  // null: as the film again; undo puts the scene's own back.
+  const cleared = applyOps(b, [{ op: 'scene.set', id: 's1', fields: { render: null } }], ctx);
+  assert.equal('render' in cleared.board.scenes[0], false);
+  assert.equal(cleared.summaries[0], 'changed s1 “One”: renders as the film does (raster)');
+  assert.equal(apply(cleared.board, cleared.inverse).scenes[0].render.type, 'raytrace');
+  // One way per scene, a known one, and only the fields a scene's render has.
+  assert.throws(() => apply(b, [{ op: 'scene.set', id: 's1', fields: { render: { type: ['raster', 'edit'] } } }]), /a scene is made one way/);
+  assert.throws(() => apply(b, [{ op: 'scene.set', id: 's1', fields: { render: { type: 'blender' } } }]), /isn't one of/);
+  assert.throws(() => apply(b, [{ op: 'scene.set', id: 's1', fields: { render: { type: 'raster', samples: 64 } } }]), /render: unknown field "samples"/);
+  assert.throws(() => apply(sample(), [{ op: 'scene.set', id: 's1', fields: { render: { final: 'x' } } }]), /say how this scene is made/);
+  // A scene can come with its render, and the user's own change to it is one Claude hears about.
+  const added = apply(b, [{ op: 'scene.add', scene: { title: 'Glass', render: { type: 'pathtrace', final: '256 samples' } } }]);
+  assert.deepEqual(added.scenes.at(-1).render, { type: 'pathtrace', final: '256 samples' });
+  const mine = applyOps(b, [{ op: 'scene.set', id: 's3', fields: { render: { type: 'raytrace' } } }], { ...ctx, author: 'you' }).board;
+  assert.deepEqual(editList(mine).map(e => [e.scene, e.field, e.before, e.now]), [['s3', 'render', null, { type: 'raytrace' }]]);
+});
+
+test('the cut: each scene\'s version that fits the size and quality, or what it has', () => {
+  let b = apply(sample(), [
+    { op: 'scene.set', id: 's1', fields: { render: { type: 'raytrace' } } },
+    { op: 'scene.set', id: 's3', fields: { render: { type: 'edit', source: '/films/a-4k.mp4' } } },
+    { op: 'render.add', scene: 's1', render: { file: 'media/a.mp4', kind: 'video', duration: 2, width: 1280, height: 720, meta: { quality: 'draft' } } },
+    { op: 'render.add', scene: 's1', render: { file: 'media/b.mp4', kind: 'video', duration: 2, width: 3840, height: 2160, meta: { quality: 'final' } }, activate: false },
+    { op: 'render.add', scene: 's3', render: { file: 'media/c.mp4', kind: 'video', duration: 1, width: 3840, height: 2160 } },
+  ]);
+  const at = (size, q) => cutPlan(b, size, q).map(p => [p.scene.id, p.render?.file ?? null]);
+  // A 4K final: the final version (not the active draft), and the edit's footage, whatever its quality.
+  assert.deepEqual(at('4k', 'final'), [['s1', 'media/b.mp4'], ['s2', null], ['s3', 'media/c.mp4']]);
+  // A 720p draft: the active version is big enough.
+  assert.deepEqual(at('720p', 'draft'), [['s1', 'media/a.mp4'], ['s2', null], ['s3', 'media/c.mp4']]);
+  // A sketch, a small version, or a draft for a final: nothing fits, and the plan says what the scene has.
+  b = apply(b, [{ op: 'render.remove', scene: 's1', id: b.scenes[0].renders[1].id }]);
+  const p = cutPlan(b, '4k', 'final')[0];
+  assert.equal(p.render, null);
+  assert.equal(versionWords(p.active), '1280×720 draft clip');
+  assert.equal(p.how.type, 'raytrace');
+  // A clip shorter than its scene is cut in, and flagged.
+  assert.equal(cutPlan(b, '4k', 'final')[2].short, true);
 });
 
 test('how a film is rendered: Claude says once it has decided, and requests say what draft and final mean', () => {
