@@ -9,7 +9,7 @@ import { fitAll, zoomBy } from './timeline.js';
 import { setView } from './grid.js';
 import { actions } from './actions.js';
 import { plural, noteState, forYou, sceneStart, aspectName, aspectFrame, RENDER_TYPES, RENDER_QUALITIES, ASPECTS } from '/lib/ops.js';
-import { focusComposer, setFrame, sendAll, annotateHere } from './composer.js';
+import { focusComposer, setFrame, sendAll, annotateHere, waiting } from './composer.js';
 import { openRender } from './render.js';
 import { handOffWhenOpen, claudeState, reachable, claudeAct, presenceCard } from './handoff.js';
 import { refreshTip } from './tip.js';
@@ -107,7 +107,7 @@ async function boardMenu(anchor) {
       h('span.bt', b.title),
       h('span.bsub', [b.owner || 'no owner', ago(new Date(b.updated).toISOString()), plural(b.scenes, 'scene')].join(' · ')),
     ),
-    b.unsent > 0 && h('span.bunsent', { 'data-tip': `${plural(b.unsent, 'note')} you haven’t sent yet: open the board and press Send to Claude` }, String(b.unsent)),
+    b.unsent + b.changes > 0 && h('span.bunsent', { 'data-tip': `${waiting(b.unsent, b.changes)} you haven’t sent yet: open the board and press Send to Claude` }, String(b.unsent + b.changes)),
     b.forYou > 0 && h('span.bfor', { 'data-tip': `${plural(b.forYou, 'note')} waiting on you` }, String(b.forYou)),
     b.listening > 0 ? h('i.light.is-on', { 'data-tip': 'Claude is listening for your notes on this board' })
       : b.busy && h('i.light.is-work', { 'data-tip': 'Claude is working on your notes on this board' }),

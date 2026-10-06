@@ -316,3 +316,32 @@ test('created ids come back by kind', () => {
   const r = applyOps(sample(), [{ op: 'scene.add', scene: { title: 'X', renders: [{ file: 'media/a.png' }] } }, { op: 'note.add', note: { scene: null, text: 'n' } }], ctx);
   assert.deepEqual(createdIds(r.applied), { scenes: ['s4'], renders: ['r1'], notes: ['n1'] });
 });
+
+test('the user’s own changes wait for their Send, each as what it was', () => {
+  const you = { author: 'you', now: ctx.now };
+  let b = sample();
+  const [s1, s2] = b.scenes.map(s => s.id);
+  // an accident and its fix: nothing to send
+  b = apply(b, [{ op: 'scene.set', id: s2, fields: { picture: '' } }], you);
+  assert.deepEqual(b.edits, { [`${s2}.picture`]: { before: 'A dot' } });
+  b = apply(b, [{ op: 'scene.set', id: s2, fields: { picture: 'A dot' } }], you);
+  assert.equal(b.edits, undefined, 'put back, it is no change');
+  // Claude's changes aren't the user's
+  b = apply(b, [{ op: 'scene.set', id: s1, fields: { sound: 'Hum' } }]);
+  assert.equal(b.edits, undefined);
+  // a new scene is one change, with its fields; a reorder put back is none
+  b = apply(b, [{ op: 'scene.add', scene: { title: 'Four' } }], you);
+  const s4 = b.scenes.at(-1).id;
+  b = apply(b, [{ op: 'scene.set', id: s4, fields: { picture: 'Rain' } }, { op: 'scene.move', id: s1, index: 2 }], you);
+  assert.deepEqual(Object.keys(b.edits), [s4, 'order']);
+  b = apply(b, [{ op: 'scene.move', id: s1, index: 0 }], you);
+  assert.deepEqual(Object.keys(b.edits), [s4]);
+  // Send hands them over as was → now and clears them; taking the Send back brings them back
+  b = apply(b, [{ op: 'scene.set', id: s2, fields: { duration: 3 } }], you);
+  const sent = applyOps(b, [{ op: 'notes.send' }], you);
+  assert.deepEqual(sent.applied[0].edits.map(e => [e.key, e.before, e.now]), [[s4, false, true], [`${s2}.duration`, 1.5, 3]]);
+  assert.equal(sent.summaries[0], 'sent 2 changes to Claude');
+  assert.equal(sent.board.edits, undefined);
+  assert.deepEqual(applyOps(sent.board, sent.inverse, you).board.edits, b.edits);
+  assert.throws(() => applyOps(sent.board, [{ op: 'notes.send' }], you), /no unsent notes or changes/);
+});

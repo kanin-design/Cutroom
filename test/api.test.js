@@ -134,6 +134,18 @@ test('wait returns when the user sends notes, and reads them', async () => {
   assert.equal(board.notes[0].readBy, 'claude', 'handing the notes over marks them read');
 });
 
+test('the user’s own changes reach the agent with their next Send, as was → now', async () => {
+  const board = async () => (await call('GET', '/agent/boards/api-test?format=json')).body;
+  const before = (await board()).rev, s2 = (await board()).scenes[1].id;
+  await call('POST', '/api/boards/api-test/ops', { ops: [{ op: 'scene.set', id: s2, fields: { picture: 'A dot, slower' } }], author: 'you' });
+  assert.equal((await call('GET', '/api/boards')).body.boards.find(b => b.slug === 'api-test').changes, 1, 'the board list counts it as waiting');
+  await call('POST', '/api/boards/api-test/ops', { ops: [{ op: 'notes.send', ids: [] }], author: 'you' });
+  const sent = await call('GET', `/agent/boards/api-test/wait?on=send&since=${before}&timeout=5`);
+  assert.match(sent.body, /^The user sent you 1 change they made on the board themselves on “API test”/);
+  assert.match(sent.body, new RegExp(`\\n- ${s2} “[^”]*”, its picture: was (empty|“[^”]*”) → now “A dot, slower”\\n`));
+  assert.equal((await board()).edits, undefined, 'sent, nothing waits');
+});
+
 test('a session handed notes is busy until it waits again; a ping reaches it either way', async () => {
   const boards = async () => (await call('GET', '/api/boards')).body.boards.find(b => b.slug === 'api-test');
   // the wait above handed over a note and nothing has waited since: the session is on it

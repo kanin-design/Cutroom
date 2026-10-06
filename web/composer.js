@@ -67,10 +67,10 @@ function render() {
         ? `Add a note about this frame of “${hit.scene.title}”…`
         : `Add a note about “${hit.scene.title}”…`;
   updateAdd();
-  const unsent = unsentNotes().length;
-  sendAllBtn.hidden = !unsent;
-  if (unsent) sendAllBtn.replaceChildren(h('span', { html: icons.spark, style: { display: 'inline-grid' } }), `Send ${unsent} to Claude`);
-  sendAllBtn.title = `Hand your ${plural(unsent, 'unsent note')} to Claude (⌘⏎)`;
+  const notes = unsentNotes().length, changes = unsentChanges();
+  sendAllBtn.hidden = !notes && !changes;
+  if (notes || changes) sendAllBtn.replaceChildren(h('span', { html: icons.spark, style: { display: 'inline-grid' } }), `Send ${notes + changes} to Claude`);
+  sendAllBtn.title = `Hand Claude ${waiting(notes, changes)} you haven’t sent yet (⌘⏎)`;
 }
 
 function fit() {
@@ -98,6 +98,9 @@ export function noteOnSoundtrack(t = null) {
 }
 
 const unsentNotes = () => (S.board ? S.board.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved) : []);
+// Your own changes to the board since you last sent: they go to Claude with the notes.
+const unsentChanges = () => Object.keys(S.board?.edits || {}).length;
+export const waiting = (notes, changes) => [notes && plural(notes, 'note'), changes && plural(changes, 'change')].filter(Boolean).join(' and ');
 
 // Enter: add the note to the board. Claude doesn't get it until you send.
 async function add() {
@@ -131,18 +134,20 @@ async function add() {
 export async function sendAll() {
   if (text.value.trim() || pendingFiles('bar').length) await add();
   const notes = unsentNotes();
-  if (!notes.length) return toast('No unsent notes. Add notes first, then send them.');
+  if (!notes.length && !unsentChanges()) return toast('Nothing to send. Add a note, or change the board, first.');
   return sendNotes(notes);
 }
 
 // Hand notes to Claude, then say honestly what happens to them. `what` names them for the user. A session
 // listening has them now; a busy one (working on earlier notes) gets them the moment it's done; with
 // neither, nothing will notice them by itself, so the hand-off message is offered.
-export async function sendNotes(notes, { what = plural(notes.length, 'note') } = {}) {
+export async function sendNotes(notes, { what = notes.length ? plural(notes.length, 'note') : '' } = {}) {
+  const changes = unsentChanges();
   const j = await commit([{ op: 'notes.send', ids: notes.map(n => n.id) }]);
   if (!j) return;
   render();
-  const them = notes.length > 1 ? 'them' : 'it';
+  if (changes) what = [what, plural(changes, 'change')].filter(Boolean).join(' and ');
+  const them = notes.length + changes > 1 ? 'them' : 'it';
   const st = claudeState(S.board.owner);
   if (st.key === 'listening') return toast(`Sent ${what} to Claude: it has ${them} now`);
   if (st.key === 'busy') return toast(`Sent ${what}. Claude is working on your earlier notes and gets ${them} the moment it’s done`, { ms: 5000 });

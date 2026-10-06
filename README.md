@@ -49,7 +49,8 @@ sits and the picture as you saw it.
 
 Notes wait until you press **Send to Claude** (⌘⏎), so you can watch the whole cut and send everything at
 once. A note can be about the whole film, one scene or one frame, and carry references: drop in a still,
-a clip or a screenshot.
+a clip or a screenshot. Your own edits go along too: rewrite a scene's picture, change its length or
+reorder the cut, and Claude gets each change as it was and as it is now.
 
 ### 3. Claude answers, and you watch it work
 
@@ -127,8 +128,9 @@ editor for every shortcut.
 - **Top bar.** The film's title, how it's rendered once Claude has decided (Ray marched, say; hover it for
   what that means and what draft and final mean, click it for the film), and its shape, frame rate,
   tempo, scenes and length.
-- **Edit's side pane: the scene.** The scene you selected, or else the one under the playhead (it says
-  so, and follows the playhead as the cut plays, except while you type in it). Its status, the version
+- **Edit's side pane: the scene.** The scene under the playhead (it says so, and follows the playhead as
+  the cut plays, except while you type in it). Click a scene to go to it; it stays until the playhead moves
+  on to another. Its status, the version
   playing and the quality it was rendered at, its length and colour, what we see and hear, and every
   version.
 - **Board's side pane: the film.** How it's rendered; where it stands (its scenes by status, its length,
@@ -162,6 +164,10 @@ editor for every shortcut.
     re-rendering, unless a note asks for that). A note not sent has a hollow light and a dashed edge.
   - Each note has a light for where it stands (sent, read, being worked on, answered, done); hover it to
     read which.
+  - Changes you make yourself count as well: a scene's title, picture, sound, length, status or version,
+    scenes added, deleted or moved, the board's title, brief or treatment. Send hands them to Claude with
+    your notes, each as was → now. Until then a changed field has the same dashed edge as a note not sent
+    and says **Not sent**, with **Put back** to bring back what was there (hover it to read it first).
   - Open notes sit on the timeline with their words: a frame note at its frame, a scene note across its
     scene. Marks show on the picture on their own frame only.
   - The Notes panel groups notes by scene, in the order of the cut; picking one takes you to it.

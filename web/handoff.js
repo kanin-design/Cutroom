@@ -17,7 +17,7 @@ export async function handOff({ sent = null } = {}) {
   const { text } = await r.json();
   card?.close();
   const b = S.board, owner = b.owner;
-  const many = +(/^\d+/.exec(sent || '')?.[0] ?? 1) > 1;
+  const many = / and /.test(sent || '') || +(/^\d+/.exec(sent || '')?.[0] ?? 1) > 1;
   const message = h('textarea.field.handoff-text', { readOnly: true, rows: 4 });
   message.value = text;
   const copy = h('button.text-btn.primary', {

@@ -64,6 +64,19 @@ function prose(key, value, save, placeholder) {
   return h('div.md', { title: 'Click to edit', html: markdown(value), onclick: e => { if (e.target.closest('a')) return; editing.add(key); render(); } });
 }
 
+// Something you changed since you last sent (`key` in the board's edits): Claude hasn't seen it yet. Its field
+// gets a dashed edge, like a note not sent, and this says so, with a way to put back what was there.
+function unsent(key, putBack, show = v => (v == null || v === '' ? 'It was empty.' : String(v))) {
+  const e = S.board.edits?.[key];
+  if (!e) return null;
+  const back = h('button.link.has-card', { onclick: () => putBack(e.before) }, h('span', { html: icons.undo }), 'Put back');
+  back.card = () => [h('div.tip-head', 'What was there'), h('div.tip-text.tip-was', clipText(show(e.before), 320)), h('div.tip-sub', 'Your change goes to Claude with your next Send.')];
+  return h('span.unsent-edit', h('span', 'Not sent'), back);
+}
+const clipText = (t, n) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+// The field's dashed edge, while its change isn't sent.
+const marked = (el, key) => { if (S.board.edits?.[key]) el.classList.add('unsent'); return el; };
+
 // Just enough markdown for a treatment: headings, lists, bold, italics, code and links. Escaped first.
 function markdown(src) {
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -179,8 +192,9 @@ function scenePanel() {
   const beats = b.bpm ? +(s.duration / (60 / b.bpm)).toFixed(2) : null;
 
   const title = bound(`title:${s.id}`, s.title, (v, k) => v.trim() && set({ title: v }, k), { cls: 'bare scene-title', placeholder: 'Title' });
+  const was = (field, show) => unsent(`${s.id}.${field}`, v => set({ [field]: v }), show);
   title.id = 'sceneTitle';
-  const dur = bound(`dur:${s.id}`, +s.duration.toFixed(4), (v, k) => { const n = parseFloat(v); if (n > 0) set({ duration: n }, k); }, { cls: 'num', type: 'number' });
+  const dur = marked(bound(`dur:${s.id}`, +s.duration.toFixed(4), (v, k) => { const n = parseFloat(v); if (n > 0) set({ duration: n }, k); }, { cls: 'num', type: 'number' }), `${s.id}.duration`);
   dur.step = String(1 / b.fps);
   dur.min = '0';
 
@@ -198,7 +212,7 @@ function scenePanel() {
     h('div.sec',
       h('div.scene-head',
         h('span.scene-num', String(row.index + 1).padStart(2, '0')),
-        h('div', { style: { flex: 1, minWidth: 0 } }, title, timeLine(b, row), following && h('div.scene-id.following', 'At the playhead')),
+        h('div', { style: { flex: 1, minWidth: 0 } }, title, timeLine(b, row), following && h('div.scene-id.following', 'At the playhead'), was('title') && h('div.scene-id', 'Title ', was('title'))),
         h('button.icon-btn.more', { title: 'More', html: icons.more, onclick: more }),
       ),
     ),
@@ -207,11 +221,12 @@ function scenePanel() {
         class: s.status === st ? 'on' : i < STATUSES.indexOf(s.status) ? 'past' : '', style: { '--sc': STATUS_COLOR[st] },
         onclick: () => s.status !== st && set({ status: st }),
       }, h('i'), st[0].toUpperCase() + st.slice(1)))),
+      was('status') && h('div.now-playing', 'Status ', was('status', v => `${v[0].toUpperCase()}${v.slice(1)}`)),
       playing(s),
     ),
     h('div.sec.props',
       h('span.label', 'Length'),
-      h('div.dur-row', dur, h('span.unit', 's'), h('div.facts', h('span', `${Math.round(s.duration * b.fps)}f`), beats != null && h('span', plural(beats, 'beat')))),
+      h('div.dur-row', dur, h('span.unit', 's'), h('div.facts', h('span', `${Math.round(s.duration * b.fps)}f`), beats != null && h('span', plural(beats, 'beat'))), was('duration', v => secs(v))),
       h('span.label', 'Colour'),
       h('div.swatches',
         h('button.none', { class: !s.color ? 'on' : '', title: 'Automatic: a colour unlike the scenes beside it', style: { '--c': 'var(--faint)' }, onclick: () => s.color && set({ color: null }) }),
@@ -219,12 +234,12 @@ function scenePanel() {
       ),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Picture')),
-      bound(`picture:${s.id}`, s.picture, (v, k) => set({ picture: v }, k), { tag: 'textarea', placeholder: 'What we see — framing, action, light, motion…' }),
+      h('div.sec-head', h('span.label', 'Picture'), was('picture')),
+      marked(bound(`picture:${s.id}`, s.picture, (v, k) => set({ picture: v }, k), { tag: 'textarea', placeholder: 'What we see — framing, action, light, motion…' }), `${s.id}.picture`),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Sound')),
-      bound(`sound:${s.id}`, s.sound, (v, k) => set({ sound: v }, k), { tag: 'textarea', placeholder: 'What we hear — music cue, effects, voice…' }),
+      h('div.sec-head', h('span.label', 'Sound'), was('sound')),
+      marked(bound(`sound:${s.id}`, s.sound, (v, k) => set({ sound: v }, k), { tag: 'textarea', placeholder: 'What we hear — music cue, effects, voice…' }), `${s.id}.sound`),
     ),
     rendersSection(s),
     Object.keys(s.meta || {}).length && h('div.sec',
@@ -239,7 +254,7 @@ function scenePanel() {
 function playing(s) {
   const r = activeRender(s);
   if (!r) return null;
-  return h('div.playing', h('span', 'Playing'), h('b', `v${s.renders.indexOf(r) + 1}`), h('span', versionQuality(r) || kindName(r)), h('span', ago(r.created)));
+  return h('div.now-playing', h('span', 'Playing'), h('b', `v${s.renders.indexOf(r) + 1}`), h('span', versionQuality(r) || kindName(r)), h('span', ago(r.created)));
 }
 
 // A shot's versions as its history, oldest first: the idea sketches, then renders. One is active.
@@ -334,6 +349,7 @@ function filmPanel() {
   return [
     h('div.sec',
       bound('board:title', b.title, (v, k) => v.trim() && set({ title: v }, k), { cls: 'bare scene-title', placeholder: 'Board title' }),
+      unsent('board.title', v => set({ title: v })) && h('div.scene-id', 'Title ', unsent('board.title', v => set({ title: v }))),
     ),
     h('div.sec',
       h('div.sec-head', h('span.label', 'Render'), b.render && h('span.hint', 'set by Claude')),
@@ -344,12 +360,12 @@ function filmPanel() {
       progress(b),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Brief')),
-      prose('board:brief', b.brief, (v, k) => set({ brief: v }, k), 'The idea, the tone, the rules — what the film is.'),
+      h('div.sec-head', h('span.label', 'Brief'), unsent('board.brief', v => set({ brief: v }))),
+      marked(prose('board:brief', b.brief, (v, k) => set({ brief: v }, k), 'The idea, the tone, the rules — what the film is.'), 'board.brief'),
     ),
     h('div.sec',
-      h('div.sec-head', h('span.label', 'Treatment')),
-      prose('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), 'The film thought through: the idea, the style, the shape, every scene, how it’s made.'),
+      h('div.sec-head', h('span.label', 'Treatment'), unsent('board.treatment', v => set({ treatment: v }))),
+      marked(prose('board:treatment', b.treatment, (v, k) => set({ treatment: v }, k), 'The film thought through: the idea, the style, the shape, every scene, how it’s made.'), 'board.treatment'),
     ),
     h('div.sec',
       h('button.fold', { class: settingsOpen ? 'open' : '', 'aria-expanded': String(settingsOpen), onclick: () => { openSettings(!settingsOpen); render(); } },
@@ -688,6 +704,9 @@ on('time', () => {
   if (id === hereId) return;
   hereId = id;
   if (panel.contains(document.activeElement)) return;
+  // The playhead moved on to another scene: the one you clicked was where you were, and now the pane (and the
+  // timeline's highlight) follow where you are.
+  if (S.sel.scene && id && S.sel.scene !== id) { S.sel = { scene: null, note: null }; emit('select'); }
   if (S.tab === 'notes' || (S.tab === 'scene' && S.view === 'edit' && !scene(S.sel.scene))) render();
 });
 on('view', render);

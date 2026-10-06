@@ -278,7 +278,7 @@ async function api(req, res, url, [a, slug, action]) {
         const b = live.get(x.slug)?.board || store.read(x.slug);
         const L = live.get(x.slug);
         const p = L ? presence(L) : null;
-        return { ...x, listening: p ? p.watching || +(p.answeringUntil > Date.now()) : 0, busy: !!p && p.busyUntil > Date.now(), forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length, unsent: b.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved).length };
+        return { ...x, listening: p ? p.watching || +(p.answeringUntil > Date.now()) : 0, busy: !!p && p.busyUntil > Date.now(), forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length, unsent: b.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved).length, changes: Object.keys(b.edits || {}).length };
       });
       return send(res, 200, { boards });
     }
@@ -292,7 +292,11 @@ async function api(req, res, url, [a, slug, action]) {
   const L = open(slug);
   if (!action && req.method === 'GET') return send(res, 200, { slug, board: L.board });
   // The message that hands this board to a Claude session (?sent=… when notes were just sent to nobody).
-  if (action === 'handoff') return send(res, 200, { text: handoff(L.board, { base: `http://${req.headers.host}`, slug, root: store.ROOT, sent: url.searchParams.get('sent') }) });
+  if (action === 'handoff') {
+    // After a Send nobody heard: the new session reads it the way a listening one would have, from the send on.
+    const last = store.readLog(slug, { limit: 1000 }).findLast(e => (e.ops || []).some(o => o.op === 'notes.send'));
+    return send(res, 200, { text: handoff(L.board, { base: `http://${req.headers.host}`, slug, root: store.ROOT, sent: url.searchParams.get('sent'), since: last ? last.rev - 1 : null }) });
+  }
   if (action === 'text') return send(res, 200, boardText(L.board, { slug, dir: store.dir(slug), notes: url.searchParams.get('notes') || 'open' }), 'text/plain; charset=utf-8');
   if (action === 'log') return send(res, 200, { entries: store.readLog(slug, { since: +url.searchParams.get('since') || 0, limit: +url.searchParams.get('limit') || 200 }) });
   if (action === 'events') return events(req, res, L, url);
