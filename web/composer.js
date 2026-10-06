@@ -4,8 +4,9 @@
 // on the frame itself, the markup button (A) opens the frame large in the annotator.
 
 import { S, on, emit, here, commit, select, scene, hold } from './store.js';
-import { layout, snapFrame, plural } from '/lib/ops.js';
+import { layout, snapFrame, plural, editList, sendList } from '/lib/ops.js';
 import { $, h, tc, menu, toast } from './util.js';
+import { refreshTip } from './tip.js';
 import { icons } from './icons.js';
 import { pause, seek } from './player.js';
 import { sceneColor } from './viewer.js';
@@ -70,8 +71,27 @@ function render() {
   const notes = unsentNotes().length, changes = unsentChanges();
   sendAllBtn.hidden = !notes && !changes;
   if (notes || changes) sendAllBtn.replaceChildren(h('span', { html: icons.spark, style: { display: 'inline-grid' } }), `Send ${notes + changes} to Claude`);
-  sendAllBtn.title = `Hand Claude ${waiting(notes, changes)} you haven’t sent yet (⌘⏎)`;
 }
+
+// The Send button's card: what it hands Claude (sendList), so you can check before you send. A long list shows
+// its first rows and how many more, so the card stays on screen.
+function sendCard() {
+  const notes = unsentNotes().length, changes = unsentChanges();
+  if (!notes && !changes) return null;
+  const list = sendList(S.board);
+  const rows = (all, max = 8) => [
+    h('div.send-list', all.slice(0, all.length > max ? max - 1 : max).map(r => h('div.send-row', h('span.n', r.n), h('span.t', r.t), r.w && h('span.w', r.w)))),
+    all.length > max && h('div.tip-sub', `and ${all.length - max + 1} more`),
+  ];
+  return [
+    h('div.tip-head', 'Not sent yet'),
+    notes > 0 && [h('div.tip-sub', plural(notes, 'note')), rows(list.notes)],
+    changes > 0 && [h('div.tip-sub', `${plural(changes, 'change')} you made on the board`), rows(list.changes)],
+    h('div.tip-sub', 'Send hands Claude all of them (⌘⏎).'),
+  ];
+}
+sendAllBtn.card = sendCard;
+on('board', () => refreshTip(sendAllBtn)); // open while the board changes: it shows what waits now
 
 function fit() {
   text.style.height = 'auto';
@@ -99,7 +119,7 @@ export function noteOnSoundtrack(t = null) {
 
 const unsentNotes = () => (S.board ? S.board.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved) : []);
 // Your own changes to the board since you last sent: they go to Claude with the notes.
-const unsentChanges = () => Object.keys(S.board?.edits || {}).length;
+const unsentChanges = () => (S.board ? editList(S.board).length : 0);
 export const waiting = (notes, changes) => [notes && plural(notes, 'note'), changes && plural(changes, 'change')].filter(Boolean).join(' and ');
 
 // Enter: add the note to the board. Claude doesn't get it until you send.

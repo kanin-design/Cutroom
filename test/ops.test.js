@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { newBoard, applyOps, layout, locate, noteTime, noteState, sceneColors, boardGaps, forYou, timecode, parseTimecode, clock, seconds, snapFrame, fitDuration, kindName, musical, createdIds, plural, renderSize, renderWords, renderTypeName, barBeat, aspectFrame, aspectName, COLORS, MARK_COLORS, sceneRender, filmRenderTypes, cutPlan, versionWords, editList } from '../lib/ops.js';
+import { newBoard, applyOps, layout, locate, noteTime, noteState, sceneColors, boardGaps, forYou, timecode, parseTimecode, clock, seconds, snapFrame, fitDuration, kindName, musical, createdIds, plural, renderSize, renderWords, renderTypeName, barBeat, aspectFrame, aspectName, COLORS, MARK_COLORS, sceneRender, filmRenderTypes, cutPlan, versionWords, editList, mergeEdits, sendList } from '../lib/ops.js';
 
 const ctx = { author: 'claude', now: '2026-10-01T12:00:00.000Z' };
 const apply = (b, ops, c = ctx) => applyOps(b, ops, c).board;
@@ -402,4 +402,70 @@ test('the user’s own changes wait for their Send, each as what it was', () => 
   assert.equal(sent.board.edits, undefined);
   assert.deepEqual(applyOps(sent.board, sent.inverse, you).board.edits, b.edits);
   assert.throws(() => applyOps(sent.board, [{ op: 'notes.send' }], you), /no unsent notes or changes/);
+});
+
+test('a change undone by anyone, so the board is as it was at the last send, is no change to send', () => {
+  const you = { author: 'you', now: ctx.now };
+  const sent = sample();
+  // The user deletes two scenes; Claude brings both back from the log's inverse ops, same ids and content.
+  const del2 = applyOps(sent, [{ op: 'scene.remove', id: 's2' }], you);
+  const del3 = applyOps(del2.board, [{ op: 'scene.remove', id: 's3' }], you);
+  assert.deepEqual(editList(del3.board).map(e => [e.key, e.before, e.now]), [['s2', true, false], ['s3', true, false]]);
+  let b = apply(del3.board, [...del3.inverse, ...del2.inverse]);
+  assert.deepEqual(b.scenes, sent.scenes);
+  assert.equal(b.edits, undefined, 'deleted and brought back: nothing waits');
+  assert.deepEqual(editList(b), []);
+  assert.throws(() => applyOps(b, [{ op: 'notes.send' }], you), /no unsent notes or changes/);
+  // A field Claude puts back drops out too.
+  b = apply(b, [{ op: 'scene.set', id: 's1', fields: { picture: 'Fog' } }], you);
+  b = apply(b, [{ op: 'scene.set', id: 's1', fields: { picture: '' } }]);
+  assert.equal(b.edits, undefined);
+  // A deleted scene's own changes wait with it: brought back, they count again, and the deletion doesn't.
+  const sound = applyOps(b, [{ op: 'scene.set', id: 's2', fields: { sound: 'Snare' } }], you);
+  const gone = applyOps(sound.board, [{ op: 'scene.remove', id: 's2' }], you);
+  assert.deepEqual(editList(gone.board).map(e => e.key), ['s2']);
+  b = apply(gone.board, gone.inverse);
+  assert.deepEqual(editList(b).map(e => [e.key, e.before, e.now]), [['s2.sound', 'Kick', 'Snare']]);
+  b = apply(b, sound.inverse, you);
+  assert.equal(b.edits, undefined);
+  // So does a scene's new place: moved, deleted and brought back where it was moved to, it is a reorder again.
+  const moved = applyOps(b, [{ op: 'scene.move', id: 's3', index: 0 }], you);
+  const out = applyOps(moved.board, [{ op: 'scene.remove', id: 's3' }], you);
+  assert.deepEqual(editList(out.board).map(e => e.key), ['s3']);
+  b = apply(out.board, out.inverse);
+  assert.deepEqual(editList(b).map(e => [e.key, e.now]), [['order', ['s3', 's1', 's2']]]);
+  b = apply(b, moved.inverse);
+  assert.equal(b.edits, undefined);
+  // Sent twice before Claude heard either: deleted, then brought back, is no change either.
+  const first = applyOps(del2.board, [{ op: 'notes.send' }], you);
+  const back = applyOps(first.board, del2.inverse, you);
+  const second = applyOps(back.board, [{ op: 'notes.send' }], you);
+  assert.deepEqual(second.applied[0].edits.map(e => [e.key, e.before, e.now]), [['s2', false, true]]);
+  assert.deepEqual(mergeEdits([first.applied[0].edits, second.applied[0].edits]), []);
+});
+
+test('the Send button lists what it hands Claude, in the editor’s words', () => {
+  const you = { author: 'you', now: ctx.now };
+  let b = apply(sample(), [{ op: 'render.add', scene: 's1', render: { file: 'media/a.png' } }, { op: 'render.add', scene: 's1', render: { file: 'media/b.png' } }]);
+  b = apply(b, [
+    { op: 'scene.set', id: 's1', fields: { status: 'review', activeRender: b.scenes[0].renders[0].id } },
+    { op: 'scene.set', id: 's2', fields: { duration: 3, picture: 'Two dots' } },
+    { op: 'scene.remove', id: 's3' },
+    { op: 'board.set', fields: { brief: 'A film about dots.' } },
+    { op: 'note.add', note: { scene: 's2', text: 'Slower here' } },
+    { op: 'note.add', note: { scene: 's1', at: 1, markup: { marks: [{ kind: 'point', x: 0.5, y: 0.5 }] } } },
+    { op: 'note.add', note: { render: { size: '4k' } } },
+  ], you);
+  assert.deepEqual(sendList(b), {
+    notes: [{ n: '#1', t: 'Slower here', w: 'on 02 Two' }, { n: '#2', t: 'Marks on a frame', w: 'on 01 One' }, { n: '#3', t: 'Render 4K final', w: 'on the whole film' }],
+    changes: [
+      { n: '01', t: 'One', w: 'status Idea → Review · version v2 → v1' },
+      { n: '02', t: 'Two', w: 'length 1.5s → 3s · picture' },
+      { n: '', t: 'Three', w: 'deleted' },
+      { n: '', t: 'The board', w: 'brief' },
+    ],
+  });
+  // What Claude puts back leaves the list.
+  b = apply(b, [{ op: 'scene.add', scene: sample().scenes[2] }, { op: 'scene.set', id: 's2', fields: { duration: 1.5 } }]);
+  assert.deepEqual(sendList(b).changes.map(r => r.w), ['status Idea → Review · version v2 → v1', 'picture', 'brief']);
 });

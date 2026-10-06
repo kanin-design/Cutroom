@@ -364,3 +364,27 @@ test('the cut: each scene from its own render, conformed to the film; or what is
   assert.equal(st.body.state, 'done', JSON.stringify(st.body));
   assert.equal(st.body.ready, 2);
 });
+
+test('scenes the user deleted and Claude brought back are no change to send', async () => {
+  await call('POST', '/agent/boards', { title: 'Put back' });
+  await call('POST', '/agent/boards/put-back/ops', { ops: [
+    { op: 'scene.add', scene: { title: 'One', duration: 1 } },
+    { op: 'scene.add', scene: { title: 'Two', duration: 1 } },
+    { op: 'scene.add', scene: { title: 'Three', duration: 1 } },
+  ] });
+  const changes = async () => (await call('GET', '/api/boards')).body.boards.find(b => b.slug === 'put-back').changes;
+  const since = (await call('GET', '/agent/boards/put-back?format=json')).body.rev;
+  // The user deletes two scenes in the editor; Claude brings both back with the log's inverse ops, as sb apply does.
+  for (const id of ['s3', 's2']) await call('POST', '/api/boards/put-back/ops', { ops: [{ op: 'scene.remove', id }], author: 'you' });
+  assert.equal(await changes(), 2);
+  const undo = (await call('GET', `/agent/boards/put-back/log?since=${since}&format=json`)).body.entries.reverse().flatMap(e => e.inverse);
+  await call('POST', '/api/boards/put-back/ops', { ops: undo, author: 'claude' });
+  assert.equal(await changes(), 0, 'the board is as it was at the last send');
+  assert.equal((await call('GET', '/agent/boards/put-back?format=json')).body.edits, undefined);
+  // A note sent now goes alone.
+  await call('POST', '/api/boards/put-back/ops', { ops: [{ op: 'note.add', note: { scene: 's1', text: 'Warmer' } }], author: 'you' });
+  await call('POST', '/api/boards/put-back/ops', { ops: [{ op: 'notes.send' }], author: 'you' });
+  const sent = await call('GET', `/agent/boards/put-back/wait?on=send&since=${since}&timeout=5`);
+  assert.match(sent.body, /^The user sent you 1 note on “Put back”/);
+  assert.doesNotMatch(sent.body, /Their own changes/);
+});

@@ -13,7 +13,7 @@ import { pipeline } from 'node:stream/promises';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import * as store from './lib/store.js';
-import { applyOps, findScene, defaultDuration, placement, activeRender, forYou, noteState } from './lib/ops.js';
+import { applyOps, findScene, defaultDuration, placement, activeRender, forYou, noteState, editList } from './lib/ops.js';
 import { boardText } from './lib/text.js';
 import { ingestRender, ingestAudio, mediaKind, stamp, libSource, saveAttachment, frameAt } from './lib/media.js';
 import { agentApi, makeSay } from './lib/agent.js';
@@ -279,7 +279,7 @@ async function api(req, res, url, [a, slug, action]) {
         const b = live.get(x.slug)?.board || store.read(x.slug);
         const L = live.get(x.slug);
         const p = L ? presence(L) : null;
-        return { ...x, listening: p ? p.watching || +(p.answeringUntil > Date.now()) : 0, busy: !!p && p.busyUntil > Date.now(), forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length, unsent: b.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved).length, changes: Object.keys(b.edits || {}).length };
+        return { ...x, listening: p ? p.watching || +(p.answeringUntil > Date.now()) : 0, busy: !!p && p.busyUntil > Date.now(), forYou: b.notes.filter(forYou).length, open: b.notes.filter(n => !n.resolved && n.sent).length, unsent: b.notes.filter(n => n.author === 'you' && !n.sent && !n.resolved).length, changes: editList(b).length };
       });
       return send(res, 200, { boards });
     }

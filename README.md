@@ -175,6 +175,8 @@ editor for every shortcut.
     scenes added, deleted or moved, the board's title, brief or treatment. Send hands them to Claude with
     your notes, each as was → now. Until then a changed field has the same dashed edge as a note not sent
     and says **Not sent**, with **Put back** to bring back what was there (hover it to read it first).
+    Hover **Send to Claude** to see every note and change it will hand over. A change undone, by you or
+    by Claude, is no change and drops out.
   - Open notes sit on the timeline with their words: a frame note at its frame, a scene note across its
     scene. Marks show on the picture on their own frame only.
   - The Notes panel groups notes by scene, in the order of the cut; picking one takes you to it.

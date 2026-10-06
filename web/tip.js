@@ -35,11 +35,14 @@ export function hide() {
   cur = null;
 }
 
-// The open card again, if it belongs to `el` (or to anything, without one): what it shows has changed.
+// The open card again, if it belongs to `el` (or to anything, without one): what it shows has changed. With
+// nothing left to show, it closes.
 export function refreshTip(el = null) {
   if (!cur || (el && cur.el !== el)) return;
   if (!cur.el.isConnected) return hide();
-  cur.card.replaceChildren(...[body(cur.el)].flat().filter(Boolean));
+  const content = body(cur.el);
+  if (!content) return hide();
+  cur.card.replaceChildren(...[content].flat(Infinity).filter(Boolean));
   place(cur);
 }
 
