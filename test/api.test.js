@@ -365,6 +365,34 @@ test('the cut: each scene from its own render, conformed to the film; or what is
   assert.equal(st.body.ready, 2);
 });
 
+test('the board stays current: a resolved note with nothing new on its scene, and a finished scene still on its sketch', async () => {
+  await call('POST', '/agent/boards', { title: 'Current' });
+  await call('POST', '/agent/boards/current/ops', { ops: [
+    { op: 'scene.add', scene: { title: 'One', duration: 1, sketch: '<circle cx="800" cy="450" r="100"/>' } },
+    { op: 'scene.add', scene: { title: 'Two', duration: 1 } },
+  ] });
+  const send = async (scene, text) => {
+    const added = await call('POST', '/api/boards/current/ops', { ops: [{ op: 'note.add', note: { scene, text, author: 'you' } }] });
+    const id = added.body.ops[0].note.id;
+    await call('POST', '/api/boards/current/ops', { ops: [{ op: 'notes.send', ids: [id] }] });
+    return id;
+  };
+  // Resolved with nothing new on the scene: the reply says the board still plays it as it was.
+  const n1 = await send('s1', 'Make it red');
+  const done = await call('POST', '/agent/boards/current/ops', { ops: [{ op: 'note.set', id: n1, fields: { resolved: true } }] });
+  assert.match(done.body.check, new RegExp(`${n1} on s1: nothing new is on the scene since the note was sent`));
+  // With its new preview on first, no warning.
+  const n2 = await send('s1', 'Redder');
+  const png = path.join(HOME, 'current.png');
+  execFileSync('ffmpeg', ['-y', '-v', 'error', '-f', 'lavfi', '-i', 'color=c=red:s=1280x720', '-frames:v', '1', png]);
+  await call('POST', '/agent/boards/current/renders', { scene: 's1', path: png, meta: { cmd: 'node render.js still', quality: 'draft' } });
+  const ok = await call('POST', '/agent/boards/current/ops', { ops: [{ op: 'note.set', id: n2, fields: { resolved: true } }] });
+  assert.equal(ok.body.check, undefined);
+  // A scene marked review that still plays only its card is listed until its preview is on.
+  const review = await call('POST', '/agent/boards/current/ops', { ops: [{ op: 'scene.set', id: 's2', fields: { status: 'review' } }] });
+  assert.match(review.body.todo, /a render to play \(its status says it is finished, but it plays a sketch or its card: put its preview on\) on s2/);
+});
+
 test('scenes the user deleted and Claude brought back are no change to send', async () => {
   await call('POST', '/agent/boards', { title: 'Put back' });
   await call('POST', '/agent/boards/put-back/ops', { ops: [
