@@ -30,6 +30,17 @@ curl -sf http://127.0.0.1:8840/agent || { ~/dev/storyboard/sb start && curl -sf 
     away, without being asked, so the board always plays the film as it is now. Render only the scenes you changed.
     A final, or a bigger size, only when the user asks (a render request). Ideas stay sketches until the user agrees
     on them.
+- **Never make a project inside Cutroom's folder. This is forbidden.** `~/dev/storyboard` (and any worktree of it
+  under `.claude/worktrees/`) holds only the app's code and the board files Cutroom writes itself. Nothing else goes
+  there: no film, edit, test reel, render, sound, scratch file or project folder, in the repo or in its `boards/`.
+  - **A film gets its own folder in `~/dev/#VIDEO/`:** `~/dev/#VIDEO/<name>/`, laid out as `~/dev/#VIDEO/README.md`
+    says (for a film made with the engine: `cd ~/dev/video-render-engine && npm run new-film -- <name>`). Make it
+    first, work there, and point its board at it (the board's `project` field). Renders reach the board through
+    `sb render` or the API, which copy what they need.
+  - **If your session started inside Cutroom's folder** (its working directory is `~/dev/storyboard` or a worktree
+    of it) and the task is a film, don't build it where you are: make or open its folder in `~/dev/#VIDEO/` and work
+    there by absolute paths, and tell the user the session was started in the wrong folder.
+  - Change Cutroom's own code only when the user asks for work on Cutroom itself.
 - **For detail, fetch one topic** (`GET /agent/help/<topic>`) when you need it, never the whole manual.
 - **Always end with the board's clickable link,** on its own line, in every reply that delivers or reports work on a
   film, not only the first: `Storyboard: http://127.0.0.1:8840/#<board>`. Work without a board (a sketch, a test, a
