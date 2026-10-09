@@ -113,3 +113,41 @@ test('a render request says what to render, at what size, and how to deliver it'
   assert.ok(compact.includes('n5 #5 you · RENDER 1080p final still of s1 frame 0:01.00'), compact.join('\n'));
   assert.ok(compact.includes('n3 #3 you · soundtrack 0:02.75: The snare is harsh here'), compact.join('\n'));
 });
+
+test('a note about sounds tells the agent which sounds, and where their stems are', async () => {
+  const { newBoard, applyOps } = await import('../lib/ops.js');
+  const { boardText } = await import('../lib/text.js');
+  const c = { author: 'you', now: '2026-10-01T12:00:00.000Z' };
+  let b = applyOps(newBoard({ title: 'T' }), [
+    { op: 'audio.set', audio: { file: 'media/audio/mix.wav', name: 'mix.wav', duration: 60 } },
+    { op: 'sound.set', sound: { name: 's', duration: 60, layers: [{ id: 'glass', label: 'Glass', file: 'media/sound/x/glass.flac' }], events: 'media/sound/x/events.json', count: 1 } },
+    { op: 'note.add', note: { text: 'a mess', sounds: [{ id: 'g1', layer: 'glass', t: 3, dur: 0.5, note: 'A5', label: 'pling' }], sent: '2026-10-01T12:00:00.000Z' } },
+  ], c).board;
+  const text = boardText(b, { slug: 't', notes: true, all: true });
+  assert.match(text, /A SOUND in the soundtrack at 0:03/);
+  assert.match(text, /sound: g1 \(glass, A5, 3s for 0\.5s: pling\)/);
+  assert.match(text, /glass: media\/sound\/x\/glass\.flac \(their stems\)/);
+});
+
+test('a note about sounds says when a sound changed or left the score, and what sounds with it', async () => {
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const { newBoard, applyOps } = await import('../lib/ops.js');
+  const { boardText } = await import('../lib/text.js');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sbsound-'));
+  fs.mkdirSync(path.join(dir, 'media/sound/y'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'media/sound/y/events.json'), JSON.stringify([
+    { id: 'g1', layer: 'glass', t: 3.4, dur: 0.5, note: 'B5' }, { id: 'k1', layer: 'kick', t: 3.2, dur: 0.4 }, { id: 'p1', layer: 'pad', t: 0, dur: 60, note: 'A2' },
+  ]));
+  const c = { author: 'you', now: '2026-10-01T12:00:00.000Z' };
+  const b = applyOps(newBoard({ title: 'T' }), [
+    { op: 'audio.set', audio: { file: 'media/audio/mix.wav', name: 'mix.wav', duration: 60 } },
+    { op: 'sound.set', sound: { name: 's', duration: 60, layers: [{ id: 'glass', file: 'media/sound/y/glass.flac' }], events: 'media/sound/y/events.json', count: 3, source: '/score/sound.json' } },
+    { op: 'note.add', note: { text: 'clash', sounds: [{ id: 'g1', layer: 'glass', t: 3, dur: 0.5, note: 'A5' }, { id: 'g9', layer: 'glass', t: 5 }], sent: c.now } },
+  ], c).board;
+  const text = boardText(b, { slug: 't', notes: true, all: true, dir });
+  assert.match(text, /sound: g1 .*changed since: now at 3\.4s, B5/);
+  assert.match(text, /sounding with it: 2 sounds — kick 1, pad 1/);
+  assert.match(text, /starting nearest it: k1 \(kick, 0\.2s after\)/);
+  assert.match(text, /sound: g9 .*NOT IN THE SCORE ANY MORE/);
+  assert.match(text, /score: \/score\/sound\.json/);
+});

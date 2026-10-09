@@ -30,6 +30,7 @@ on('board', () => {
   if (S.board && !S.playing && S.t > end()) seek(end());
 });
 on('seek', t => seek(t));
+on('stems', () => { audio.muted = S.muted || S.stemsOn; });
 
 export const end = () => {
   const d = total();
@@ -37,6 +38,8 @@ export const end = () => {
 };
 
 function range() {
+  // a passage marked on the soundtrack (the sound view) plays in a loop
+  if (S.range && S.range.b > S.range.a) return [S.range.a, S.range.b];
   if (S.loop && S.sel.scene) {
     const r = sceneRange(S.sel.scene);
     if (r.end > r.start) return [r.start, r.end];
@@ -50,12 +53,13 @@ const audioRate = () => (S.rate > 0 && S.rate <= 4 ? S.rate : 0);
 
 function syncAudio() {
   if (!audioSrc) return;
-  audio.muted = S.muted;
+  audio.muted = S.muted || S.stemsOn; // the sound view's stems play in its place
   const r = audioRate();
   if (S.playing && r && audioLive() && !audioBlocked) {
     if (audio.playbackRate !== r) audio.playbackRate = r;
     if (Math.abs(audio.currentTime - S.t) > 0.03 * r) audio.currentTime = S.t;
-    if (audio.paused) audio.play().catch(() => { audioBlocked = true; });
+    // only the browser refusing sound blocks it; a play() cut short by a pause (J, L) is not that
+    if (audio.paused) audio.play().catch(e => { if (e?.name === 'NotAllowedError') audioBlocked = true; });
   } else if (!audio.paused) audio.pause();
 }
 
@@ -123,7 +127,7 @@ export function shuttle(dir) {
 
 export function setMuted(m) {
   S.muted = m;
-  audio.muted = m;
+  audio.muted = m || S.stemsOn;
   emit('mute');
 }
 
@@ -138,7 +142,7 @@ function tick() {
   } else t = tStart + ((now - wallStart) / 1000) * S.rate;
   const [a, b] = range();
   if (S.rate > 0 ? t >= b : t <= a) {
-    if (S.loop) {
+    if (S.loop || S.range) {
       S.t = S.rate > 0 ? a : b;
       wallStart = now;
       tStart = S.t;

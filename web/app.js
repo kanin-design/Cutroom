@@ -1,5 +1,6 @@
 // Boot, top bar, board switching, keyboard and the bits of chrome that tie the panels together.
 
+import { clearSounds, clearLayerStates, clearRange, stepPick } from './soundview.js';
 import { S, on, emit, openBoard, undo, redo, select, commit, scene, activeSay, holding } from './store.js';
 import { $, h, menu, closeMenu, modal, toast, typing, clamp, tc, ago, ask, authorName } from './util.js';
 import { hydrateIcons, icons } from './icons.js';
@@ -371,6 +372,8 @@ try {
   const hgt = +localStorage.getItem('sb.tlh');
   if (hgt) document.documentElement.style.setProperty('--tl-h', clamp(hgt, 170, innerHeight - 260) + 'px');
 } catch {}
+// The sound view asks for room for its layers: grow the timeline by that much (the monitor keeps 260 px).
+on('grow-timeline', d => setTimelineHeight((parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tl-h')) || 272) + d));
 // Double-click: a big monitor (the smallest timeline), and back to the size it had.
 let lastTimeline = 272;
 splitter.addEventListener('dblclick', () => {
@@ -426,7 +429,8 @@ const KEYS = [
   ['N', 'New scene after the selection'], ['S', 'Split at the playhead'], ['⌘D', 'Duplicate scene'], ['⌫', 'Delete scene'],
   ['1 – 4', 'Status: idea, draft, review, approved'], ['[ ]', 'Select previous / next scene'], ['⌘Z  ⇧⌘Z', 'Undo / redo'], ['= −', 'Zoom in / out'],
   ['⇧Z', 'Fit timeline'], ['G', 'Edit / Board view'], ['Pinch · ⌘ scroll', 'Zoom the timeline'], ['Alt-drag an edge', 'Roll a cut'],
-  ['⌘ while dragging', 'No snapping'], ['Esc', 'Clear selection'],
+  ['⌘ while dragging', 'No snapping'], ['Esc', 'Let go: picked sounds, the looped passage, mute and solo, then the selection'], ['Drag on the waveform', 'Loop that passage of the soundtrack'],
+  ['⌥← ⌥→', 'Picked sound: the one before / after it in its layer'],
 ];
 
 function showKeys() {
@@ -451,6 +455,8 @@ addEventListener('keydown', e => {
   if (mod && k.toLowerCase() === 'd') { hit(); return actions.duplicate(); }
   if (mod && k === 'Enter') { hit(); return sendAll(); }
   if (mod) return;
+  // ⌥← ⌥→ with a sound picked: the one before or after it in its layer
+  if (e.altKey && (k === 'ArrowLeft' || k === 'ArrowRight') && S.soundSel?.length) { hit(); stepPick(k === 'ArrowLeft' ? -1 : 1); return; }
   switch (k) {
     case ' ': hit(); return toggle();
     case 'j': case 'J': hit(); return shuttle(-1);
@@ -495,6 +501,7 @@ addEventListener('keydown', e => {
     }
     case 'Escape':
       if (inCinema()) return setCinema(false);
+      if (clearSounds() || clearRange() || clearLayerStates()) return; // picks, then the looped passage, then mute and solo
       if (S.sel.scene || S.sel.note) { S.sel = { scene: null, note: null }; emit('select'); }
       return;
   }

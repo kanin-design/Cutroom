@@ -916,6 +916,76 @@ pre.meta { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-r
 .snotes { position: absolute; inset: 0; pointer-events: none; }
 .snotes > * { pointer-events: auto; }
 .ncard.snote { top: auto; bottom: 3px; height: 18px; }
+/* the sound view: the soundtrack's layers in rows under the mix; their heads, with mute and solo */
+.lane-audio .snotes { bottom: auto; height: min(var(--h-audio), var(--h-mix, 46px)); }
+.head-audio.layers { align-items: flex-start; padding-top: max(2px, calc(var(--h-mix, 46px) / 2 - 7px)); }
+.head-audio:has(.head-layers:not([hidden])) .head-label { display: none; }
+.head-layers {
+  margin-left: auto; margin-right: 6px; padding: 0 4px; border-radius: 3px; font: 600 8.5px/14px var(--mono); letter-spacing: 0.04em;
+  color: var(--faint); background: rgba(255, 255, 255, 0.06);
+}
+.head-layers.on { color: var(--text); background: rgba(255, 255, 255, 0.14); }
+.sheads { position: absolute; left: 0; right: 0; top: calc(var(--y-audio) + var(--h-mix, 46px) + 2px); }
+/* a lane's lower edge, in the heads: drag to set its height */
+.lane-grip { position: absolute; left: 0; right: 0; height: 7px; margin-top: -4px; cursor: row-resize; z-index: 3; }
+.lane-grip::after { content: ''; position: absolute; left: 10px; right: 10px; top: 3px; height: 1px; background: transparent; transition: background 0.12s; }
+.lane-grip:hover::after, .lane-grip.drag::after { background: var(--sel); }
+.grip-scenes { top: calc(var(--y-scenes) + var(--h-scenes) + 3px); }
+.grip-mix { top: calc(var(--y-audio) + var(--h-mix, 46px) + 1px); }
+.grip-rows { top: calc(var(--y-audio) + var(--h-audio)); }
+.tl-heads:not(:has(.shead)) .grip-rows { display: none; }
+.shead { position: absolute; left: 0; right: 0; display: flex; align-items: center; gap: 3px; padding: 0 4px 0 9px; font: min(9.5px, calc(var(--rh) - 1px))/1 var(--mono); color: var(--muted); }
+/* a layer you don't hear (muted, or another one soloed): dimmed like its blocks */
+.shead.off i, .shead.off .sl { opacity: 0.4; }
+/* rows too short for buttons: the name only (double-click still plays only that layer) */
+.shead.tight button { display: none; }
+.shead i { width: 6px; height: 6px; border-radius: 2px; background: var(--lc); flex: none; }
+/* its level at the playhead: a bar behind the name, so the layer you hear lights up */
+.shead .lv { position: absolute; left: 0; top: 1px; bottom: 1px; width: 100%; background: var(--lc); opacity: 0.22; transform: scaleX(0); transform-origin: left; pointer-events: none; }
+.shead.off .lv { opacity: 0.08; }
+.shead > :not(.lv) { position: relative; }
+/* under the picture: the sounds playing at the playhead */
+.now-sounds { display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; overflow: hidden; padding: 4px 14px 2px; min-height: 26px; }
+.now-sounds[hidden] { display: none; }
+.now-head, .now-empty { flex: none; font: 600 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin-right: 3px; }
+.now-snd { flex: none; display: inline-flex; align-items: center; gap: 5px; max-width: 240px; padding: 2px 8px 2px 6px; border-radius: 10px; font-size: 11px; color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.now-snd:hover { background: rgba(255, 255, 255, 0.12); }
+.now-snd.on { box-shadow: inset 0 0 0 1.5px #fff; }
+.now-snd.marked { box-shadow: inset 0 0 0 1.5px #ec5446; }
+.now-snd.marked b, .now-snd.marked span { text-decoration: line-through; text-decoration-color: #ec5446; }
+.now-snd i { width: 7px; height: 7px; border-radius: 2px; background: var(--lc); flex: none; }
+.now-snd b { font: 600 10.5px var(--mono); }
+.now-snd em { font: normal 10.5px var(--mono); color: var(--lc); }
+.now-snd span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.now-more { flex: none; font: 10px var(--mono); color: var(--faint); }
+.shead .sl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shead button { flex: none; width: 13px; height: min(12px, calc(var(--rh) - 1px)); padding: 0; border-radius: 2px; font: 600 min(8px, calc(var(--rh) - 2px))/1 var(--mono); color: var(--muted); background: rgba(255, 255, 255, 0.07); }
+.shead button.sm.on { background: #ec5446; color: #fff; }
+.shead button.ss.on { background: #34c46b; color: #0d1a12; }
+.note-sounds { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 2px; }
+.note-sounds .snd { display: inline-flex; align-items: center; gap: 5px; padding: 1px 7px 1px 6px; border-radius: 9px; font: 10.5px var(--mono); color: var(--text); background: rgba(255, 255, 255, 0.07); }
+.note-sounds .snd:hover { background: rgba(255, 255, 255, 0.13); }
+.note-sounds .snd i { width: 6px; height: 6px; border-radius: 2px; background: var(--lc); }
+.note-sounds .snd em { font-style: normal; color: var(--muted); }
+.note-sounds .snd.gone { text-decoration: line-through; }
+.note-sounds .snd.gone > :not(.ab) { opacity: 0.55; }
+.note-sounds .ab { display: inline-flex; gap: 3px; margin-left: 4px; text-decoration: none; }
+.note-sounds .ab button { padding: 0 6px; border-radius: 8px; font: 10px/16px var(--mono); color: var(--text); background: rgba(255, 255, 255, 0.1); }
+.note-sounds .ab button:hover { background: rgba(255, 255, 255, 0.2); }
+/* the picked sound, close up, at the top of the side panel */
+.sound-card { border-left: 3px solid var(--lc); padding-left: 12px; }
+.sound-card .sc-n { margin-left: auto; font: 10px var(--mono); color: var(--muted); }
+.sound-card .sc-title { display: flex; align-items: center; gap: 7px; margin: 2px 0 3px; font-size: 14px; }
+.sound-card .sc-title i { width: 9px; height: 9px; border-radius: 2px; background: var(--lc); flex: none; }
+.sound-card .sc-notes { font: 600 12px var(--mono); color: var(--lc); }
+.sound-card .sc-meta { font: 10.5px var(--mono); color: var(--muted); }
+.sound-card .sc-label { margin: 5px 0 2px; font-size: 12.5px; line-height: 1.4; color: var(--text); }
+.sound-card .sc-roll { display: block; width: 100%; margin: 8px 0 6px; border-radius: var(--r-media); cursor: pointer; }
+.sound-card .sc-foot { display: flex; align-items: center; gap: 10px; }
+.sound-card .sc-play { white-space: nowrap; flex: none; padding: 3px 10px; border-radius: 12px; font-size: 11.5px; color: var(--text); background: rgba(255, 255, 255, 0.08); }
+.sound-card .sc-play:hover { background: rgba(255, 255, 255, 0.14); }
+.sound-card .sc-hint { font: 10px var(--mono); color: var(--faint); }
+.note-sounds .snd.moved em:last-child, .note-sounds .snd.gone em:last-child { color: var(--claude); text-decoration: none; }
 .nline.snline { top: 0; height: calc(100% - 21px); pointer-events: none; }
 .audio-empty { position: sticky; left: 12px; display: inline-block; margin-left: 12px; line-height: var(--h-audio); color: var(--faint); font-size: 11px; pointer-events: none; }
 

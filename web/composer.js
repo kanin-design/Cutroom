@@ -13,23 +13,37 @@ import { sceneColor } from './viewer.js';
 import { wire, chips, takeFiles, pendingFiles } from './attach.js';
 import { openAnnotator } from './annotate.js';
 import { handOff, claudeState } from './handoff.js';
+import { pickedForNote, soundName, soundShort, clearSounds } from './soundview.js';
 
 const bar = $('#composerBar'), sceneBtn = $('#cbScene'), frameBtn = $('#cbFrame'), frameLabel = $('#cbFrameLabel'), tcEl = $('#cbTc');
 const text = $('#cbText'), markBtn = $('#cbMark'), sendBtn = $('#cbSend'), sendAllBtn = $('#cbSendAll'), filesEl = $('#cbFiles');
 
 hold(() => !!text.value.trim()); // words typed but not added
 
-// target: 'here' (the scene under the playhead), 'board' or 'soundtrack'
+// target: 'here' (the scene under the playhead), 'board', 'soundtrack' or 'sounds' (picked in the sound view)
 S.noteTarget = 'here';
 try { S.noteFrame = localStorage.getItem('sb.noteFrame') === '1'; } catch { S.noteFrame = false; }
 
 const target = () => (S.noteTarget !== 'here' || !S.board?.scenes.length ? null : here());
-const onSoundtrack = () => S.noteTarget === 'soundtrack' && !!S.board?.audio;
+const onSoundtrack = () => (S.noteTarget === 'soundtrack' || S.noteTarget === 'sounds') && !!S.board?.audio;
+const onSounds = () => S.noteTarget === 'sounds' && S.soundSel?.length > 0;
+// a passage looped on the soundtrack, with no sounds picked: the note is about the passage
+const onRange = () => onSoundtrack() && !onSounds() && !!S.range;
+const rangeWords = () => `${tc(S.range.a, S.board.fps)}–${tc(S.range.b, S.board.fps)}`;
 
 let chipKey = '';
 function renderChip(hit) {
   const rows = layout(S.board);
-  if (onSoundtrack()) {
+  if (onSounds()) {
+    const n = S.soundSel.length;
+    sceneBtn.style.setProperty('--c', 'var(--muted)');
+    sceneBtn.replaceChildren(h('span.wave', { html: icons.wave }), h('span.t', n === 1 ? soundShort(S.soundSel[0]) : `${n} sounds`), h('span', { html: icons.chevron, style: { display: 'inline-grid' } }));
+    sceneBtn.title = `A note about ${n === 1 ? 'this sound' : 'these sounds'}:\n${S.soundSel.slice(0, 12).map(soundName).join('\n')}${n > 12 ? `\nand ${n - 12} more` : ''}\n(shift-click sounds to pick more, Esc to let go)`;
+  } else if (onRange()) {
+    sceneBtn.style.setProperty('--c', 'rgba(255,196,90,0.9)');
+    sceneBtn.replaceChildren(h('span.wave', { html: icons.wave }), h('span.t', `Passage ${rangeWords()}`), h('span', { html: icons.chevron, style: { display: 'inline-grid' } }));
+    sceneBtn.title = 'A note about the passage you are looping (Esc lets go of it)';
+  } else if (onSoundtrack()) {
     sceneBtn.style.setProperty('--c', 'var(--muted)');
     sceneBtn.replaceChildren(h('span.wave', { html: icons.wave }), h('span.t', 'Soundtrack'), h('span', { html: icons.chevron, style: { display: 'inline-grid' } }));
     sceneBtn.title = 'A note about the soundtrack — click to choose a scene instead';
@@ -50,17 +64,19 @@ function updateAdd() { sendBtn.disabled = !text.value.trim() && !pendingFiles('b
 function render() {
   if (!S.board) return;
   const hit = target(), sound = onSoundtrack();
-  const key = sound ? 'soundtrack' : hit ? `${hit.scene.id}|${hit.scene.title}|${hit.scene.color}|${hit.index}|${S.board.rev}` : 'board';
+  const key = onSounds() ? `sounds|${S.soundSel.map(e => e.id).join(',')}` : onRange() ? `range|${S.range.a}|${S.range.b}` : sound ? 'soundtrack' : hit ? `${hit.scene.id}|${hit.scene.title}|${hit.scene.color}|${hit.index}|${S.board.rev}` : 'board';
   if (key !== chipKey) renderChip(hit);
   chipKey = key;
-  const frameOn = S.noteFrame && (!!hit || sound);
-  frameBtn.disabled = !hit && !sound;
+  const frameOn = S.noteFrame && (!!hit || sound) && !onSounds();
+  frameBtn.disabled = (!hit && !sound) || onSounds();
   frameBtn.classList.toggle('on', frameOn);
   frameLabel.textContent = sound ? 'At' : 'Frame';
   frameBtn.title = sound ? 'About this moment of the soundtrack (F)' : 'About this exact frame (F)';
   const f = Math.round(S.t * S.board.fps);
   tcEl.textContent = `${tc(S.t, S.board.fps)} · f${f}`;
-  text.placeholder = sound
+  text.placeholder = onRange() ? `Add a note about the passage ${rangeWords()}…` : onSounds()
+    ? `Add a note about ${S.soundSel.length === 1 ? `this sound (${soundShort(S.soundSel[0])})` : `these ${S.soundSel.length} sounds`}…`
+    : sound
     ? frameOn ? `Add a note about the soundtrack at ${tc(S.t, S.board.fps)}…` : 'Add a note about the whole soundtrack…'
     : !hit
       ? 'Add a note about the whole film…'
@@ -140,13 +156,16 @@ async function addNote() {
   }
   const hit = target(), sound = onSoundtrack();
   const frameOn = S.noteFrame && (!!hit || sound);
-  const note = sound ? { soundtrack: true, text: body } : { scene: hit ? hit.scene.id : null, text: body };
-  if (frameOn) note.at = snapFrame(S.board, sound ? S.t : hit.local);
+  const picked = onSounds();
+  const passage = !picked && onRange();
+  const note = picked ? { soundtrack: true, sounds: pickedForNote(), text: body } : passage ? { soundtrack: true, at: S.range.a, to: S.range.b, text: body } : sound ? { soundtrack: true, text: body } : { scene: hit ? hit.scene.id : null, text: body };
+  if (frameOn && !picked && !passage) note.at = snapFrame(S.board, sound ? S.t : hit.local);
   const files = await takeFiles('bar');
   if (files.length) note.files = files;
   showFiles();
   const j = await commit([{ op: 'note.add', note }]);
   if (!j) return;
+  if (picked) clearSounds();
   text.value = '';
   fit();
   render();
@@ -219,15 +238,15 @@ sceneBtn.addEventListener('click', e => {
   const rows = layout(S.board);
   const m = menu(r.left, r.top - 8, [
     { head: 'Message about' },
-    { label: 'Whole film', icon: 'note', cls: !cur && !onSoundtrack() ? 'cur' : '', onclick: () => { S.noteTarget = 'board'; render(); text.focus(); } },
-    S.board.audio && { label: 'Soundtrack', icon: 'wave', cls: onSoundtrack() ? 'cur' : '', onclick: () => { S.noteTarget = 'soundtrack'; render(); text.focus(); } },
+    { label: 'Whole film', icon: 'note', cls: !cur && !onSoundtrack() ? 'cur' : '', onclick: () => { clearSounds(); S.noteTarget = 'board'; render(); text.focus(); } },
+    S.board.audio && { label: 'Soundtrack', icon: 'wave', cls: onSoundtrack() ? 'cur' : '', onclick: () => { clearSounds(); S.noteTarget = 'soundtrack'; render(); text.focus(); } },
     '-',
     ...rows.map(({ scene: s, index, start }) => ({
       label: `${String(index + 1).padStart(2, '0')}  ${s.title}`,
       dot: sceneColor(s),
       meta: tc(start, S.board.fps),
       cls: cur?.scene.id === s.id ? 'cur' : '',
-      onclick: () => { S.noteTarget = 'here'; select(s.id); render(); text.focus(); },
+      onclick: () => { clearSounds(); S.noteTarget = 'here'; select(s.id); render(); text.focus(); },
     })),
   ].filter(Boolean), { cls: 'scene-menu' });
   // open upwards from the bar
@@ -238,6 +257,10 @@ sceneBtn.addEventListener('click', e => {
 on('time', render);
 on('board', render);
 on('select', render);
+on('sound', render);
+on('sound-paint', render); // the picks: the chip and the placeholder say which sounds
+on('range', render);
+on('focus-composer', () => { render(); focusComposer(); }); // right-click a sound: Write a note about it
 on('presence', render);
 on('open', () => { S.noteTarget = 'here'; text.value = ''; fit(); render(); });
 render();

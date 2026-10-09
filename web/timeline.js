@@ -2,24 +2,42 @@
 // visible stretch; scenes, note flags and the playhead are DOM on top. Native horizontal
 // scrolling gives trackpad momentum; pinch (or ⌘/Ctrl + wheel) zooms around the pointer.
 
-import { S, on, commit, select, sceneRange, mediaUrl, upload, here, activeSay } from './store.js';
+import { S, on, emit, commit, select, sceneRange, mediaUrl, upload, here, activeSay } from './store.js';
 import { layout, activeRender, totalDuration, snapFrame, noteTime, noteState, plural, STATUSES, renderLabel, sceneRender, RENDER_TYPES, RENDER_TAGS } from '/lib/ops.js';
 import { $, h, clamp, secs, tc, menu, ask, authorName } from './util.js';
 import { icons } from './icons.js';
-import { seek, end, pause } from './player.js';
+import { seek, end, pause, play } from './player.js';
 import { STATUS_COLOR, sceneColor } from './viewer.js';
 import { actions } from './actions.js';
 import { noteStatus } from './inspector.js';
 import { noteOnSoundtrack } from './composer.js';
 import { openRender } from './render.js';
+import { MIX_H, LH, ROW_COMFY, rowH, setRowH, layerRows, drawLayers, soundAt, pickSound, renderHeads, soundOpen, setSoundOpen, soloOnly, setRange, soundMenu } from './soundview.js';
 
 const PAD = 14;
 const MIN_PPS = 2, MAX_PPS = 2400;
 const tl = $('#timeline'), scroll = $('#tlScroll'), content = $('#tlContent'), canvas = $('#tlCanvas');
 const laneScenes = $('#laneScenes'), laneNotes = $('#laneNotes'), laneAudio = $('#laneAudio'), soundLane = $('#soundLane'), markersEl = $('#markers');
 const playhead = $('#playhead'), snapline = $('#snapline'), zoom = $('#zoom'), audioName = $('#audioName');
+const soundHeads = $('#soundHeads');
 const ctx = canvas.getContext('2d');
 const Y = { ruler: 34, scenes: 0, hScenes: 0, notes: 0, hNotes: 28, audio: 0, hAudio: 46 };
+// The heights you set by dragging a lane's lower edge in the heads (null: automatic), kept in this browser:
+// the scenes lane, the mix's waveform, and each of the soundtrack's layer rows.
+const LANES = { scenes: null, mix: null, row: null };
+try { Object.assign(LANES, JSON.parse(localStorage.getItem('sb.lanes') || '{}')); } catch {}
+const saveLanes = () => { try { localStorage.setItem('sb.lanes', JSON.stringify(LANES)); } catch {} };
+const mixH = () => LANES.mix ?? MIX_H;
+// What the rest leaves for the layer rows, with the scenes lane at its set height (or its least, 28 px).
+// The layer rows: where the first starts (under the mix), and which row a pointer is over (-1: none).
+const layerTop = () => Y.audio + mixH() + 2;
+function layerRowAt(e) {
+  if (!layerRows() || e.target.closest('.ncard')) return -1;
+  const y = e.clientY - scroll.getBoundingClientRect().top - layerTop(), i = Math.floor(y / rowH);
+  return y >= 0 && i < layerRows() ? i : -1;
+}
+const HIT_PX = 4; // how near a click has to be to a sound to pick it
+const layerRoom = (scenes = LANES.scenes ?? 56) => scroll.clientHeight - (Y.ruler + 8) - scenes - 6 - Y.hNotes - 6 - mixH() - 4 - 12;
 let peaks = null, peaksFor = null;
 let fitted = false;
 
@@ -32,7 +50,8 @@ const contentX = e => e.clientX - scroll.getBoundingClientRect().left + scroll.s
 function measure() {
   const H = scroll.clientHeight;
   Y.scenes = Y.ruler + 8;
-  Y.hScenes = Math.max(48, H - Y.scenes - 8 - Y.hNotes - 6 - Y.hAudio - 12);
+  const rest = H - Y.scenes - 8 - Y.hNotes - 6 - Y.hAudio - 12;
+  Y.hScenes = LANES.scenes != null ? clamp(LANES.scenes, 28, Math.max(28, rest)) : Math.max(48, rest);
   Y.notes = Y.scenes + Y.hScenes + 6;
   Y.audio = Y.notes + Y.hNotes + 6;
   const set = (k, v) => tl.style.setProperty(k, v + 'px');
@@ -43,6 +62,7 @@ function measure() {
   set('--h-notes', Y.hNotes);
   set('--y-audio', Y.audio);
   set('--h-audio', Y.hAudio);
+  set('--h-mix', mixH());
   // lane heads sit beside the scroll area, offset by the bar above
   $('#tlHeads').style.setProperty('--y-ruler-h', Y.ruler + 'px');
 }
@@ -194,10 +214,10 @@ function draw() {
 
   // waveform, in the audio clip's teal
   if (b.audio && peaks) {
-    const mid = Y.audio + Y.hAudio / 2, amp = Y.hAudio / 2 - 3;
+    const mid = Y.audio + mixH() / 2, amp = mixH() / 2 - 3;
     const rate = peaks.rate;
     ctx.fillStyle = 'rgba(52,150,120,0.13)';
-    ctx.fillRect(X(0), Y.audio, X(b.audio.duration) - X(0), Y.hAudio);
+    ctx.fillRect(X(0), Y.audio, X(b.audio.duration) - X(0), mixH());
     for (let x = Math.max(0, Math.floor(X(0))); x < Math.min(W, X(b.audio.duration)); x++) {
       const a = Math.floor(tOf(x + sl) * rate), z = Math.max(a + 1, Math.floor(tOf(x + 1 + sl) * rate));
       let p = 0, r = 0;
@@ -211,6 +231,21 @@ function draw() {
       ctx.fillStyle = 'rgba(120,222,186,0.7)';
       ctx.fillRect(x, mid - Math.min(rh, ph), 1, Math.min(rh, ph) * 2);
     }
+  }
+
+  // the soundtrack's layers, a row each under the mix (the sound view)
+  drawLayers(ctx, { top: layerTop(), W, H, X, t0, t1, tOf: x => tOf(x + sl) });
+
+  // a passage marked on the soundtrack: it loops while the film plays
+  if (S.range) {
+    const xa = Math.round(X(S.range.a)), xb = Math.round(X(S.range.b));
+    ctx.fillStyle = 'rgba(255,196,90,0.08)';
+    ctx.fillRect(xa, Y.ruler, xb - xa, H - Y.ruler);
+    ctx.fillStyle = 'rgba(255,196,90,0.75)';
+    ctx.fillRect(xa, Y.ruler, 1, H - Y.ruler);
+    ctx.fillRect(xb - 1, Y.ruler, 1, H - Y.ruler);
+    ctx.font = '10px ui-monospace, "SF Mono", Menlo, monospace';
+    ctx.fillText(`loop ${tc(S.range.a, b.fps)}–${tc(S.range.b, b.fps)} · Esc`, xa + 5, Y.audio + mixH() - 6);
   }
 
   function gridLine(x, a) {
@@ -361,7 +396,10 @@ function renderNotes() {
 
   // the lanes are as tall as what they hold; the clips take the rest
   const used = clamp(Math.max(1, ...items.map(i => i.row + 1)), 1, MAX_ROWS);
-  const hAudio = b.audio ? 46 : 24;
+  // the rows' height follows the room; their heads beside them must follow too, or the names drift off their rows
+  const rh = layerRowH();
+  if (rh !== rowH) { setRowH(rh); renderHeads(soundHeads); }
+  const hAudio = b.audio ? mixH() + (layerRows() ? layerRows() * rowH + 4 : 0) : 24;
   if (used !== noteRows || hAudio !== Y.hAudio) {
     noteRows = used;
     Y.hNotes = used * ROW_H + 6;
@@ -478,6 +516,7 @@ function renderMarkers() {
 function renderAudioLabel() {
   const a = S.board?.audio;
   audioName.textContent = a ? `${a.name} · ${secs(a.duration)}` : '';
+  $('#gripMix').hidden = !a;
   laneAudio.querySelector('.audio-empty')?.remove();
   if (!a) laneAudio.append(h('div.audio-empty', 'Drop a soundtrack here'));
 }
@@ -504,9 +543,30 @@ function placePlayhead() {
   }
 }
 
+// Drag a lane's lower edge (in the heads) to set its height; double-click it for automatic again.
+function grip(el, key, from, to) {
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('drag');
+    const y0 = e.clientY, v0 = from();
+    const move = ev => { LANES[key] = to(v0, ev.clientY - y0); measure(); renderAll(); };
+    const up = () => { el.classList.remove('drag'); saveLanes(); el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', up); };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  });
+  el.addEventListener('dblclick', () => { LANES[key] = null; saveLanes(); measure(); renderAll(); });
+}
+grip($('#gripScenes'), 'scenes', () => Y.hScenes, (v, dy) => Math.round(clamp(v + dy, 28, 800)));
+grip($('#gripMix'), 'mix', () => mixH(), (v, dy) => Math.round(clamp(v + dy, 20, 240)));
+grip($('#gripRows'), 'row', () => rowH, (v, dy) => clamp(Math.round(v + dy / Math.max(1, layerRows())), 6, 40));
+
 function renderAll() {
   sizeContent();
   renderNotes();
+  renderHeads(soundHeads);
   renderSoundNotes();
   renderClips();
   renderMarkers();
@@ -529,7 +589,42 @@ on('board', e => {
   renderAll();
   if (e?.batches) scheduleGlowCleanup();
 });
-on('select', () => { renderNotes(); renderSoundNotes(); renderClips(); });
+on('select', () => { renderNotes(); renderSoundNotes(); renderClips(); requestDraw(); });
+// the sound view: its rows change the Audio lane's height; picks and mutes redraw it
+const soundToggle = $('#soundToggle');
+soundToggle.addEventListener('click', () => { grownFor = null; setSoundOpen(!soundOpen()); });
+// A layer's row: the height you set, or as tall as the room under the mix allows: 8–15 px, or up to 28 when
+// you've made the scenes lane smaller (a score can have 17 layers). Never so tall the rows don't fit.
+function layerRowH() {
+  const n = layerRows();
+  if (!n) return LH;
+  const fit = Math.floor(layerRoom(LANES.scenes ?? 48) / n); // the scenes lane's least: what measure() gives it
+  if (LANES.row != null) return clamp(Math.min(LANES.row, fit), 6, 40);
+  return clamp(Math.floor(layerRoom() / n), 8, LANES.scenes != null ? 28 : LH);
+}
+// Showing the layers makes the timeline taller when they'd be cramped (once a set; drag the splitter back after)
+let grownFor = null;
+function growForLayers() {
+  const key = soundOpen() ? `${S.slug}|${S.board.sound.events}` : null;
+  if (!key || key === grownFor) return;
+  grownFor = key;
+  const want = layerRows() * ROW_COMFY - layerRoom();
+  if (want > 0) emit('grow-timeline', want);
+}
+function renderSound() {
+  const has = !!S.board?.sound;
+  soundToggle.hidden = !has;
+  soundToggle.classList.toggle('on', soundOpen());
+  soundToggle.title = has ? `${soundOpen() ? 'Hide' : 'Show'} the soundtrack's layers (${S.board.sound.name}: ${plural(S.board.sound.layers.length, 'layer')}, ${plural(S.board.sound.count, 'sound')})` : '';
+  $('#tlHeads').querySelector('.head-audio').classList.toggle('layers', layerRows() > 0);
+  // the rows change the Audio lane's height and so the scenes lane's: lay everything out again
+  renderAll();
+  growForLayers();
+}
+on('sound', renderSound);
+on('board', renderSound);
+on('sound-paint', () => { renderHeads(soundHeads); requestDraw(); }); // picks, mute and solo, a waveform: no new layout
+on('range', requestDraw);
 let workingKey = '';
 on('presence', () => {
   const say = activeSay();
@@ -590,8 +685,43 @@ scroll.addEventListener('pointerdown', e => {
   const clip = e.target.closest('.clip');
   if (clip && e.target.classList.contains('handle')) return startTrim(e, clip);
   if (clip) return startDrag(e, clip);
+  // a sound in one of the soundtrack's layers: pick it (shift or ⌘ to pick more) and hear it. The second press of a
+  // double-click is the double-click's (play only that layer): it neither picks again nor scrubs (scrubbing pauses).
+  // A press between sounds scrubs as anywhere else and keeps the picks (Esc lets go of them).
+  const row = layerRowAt(e);
+  if (row >= 0) {
+    if (e.detail >= 2) return;
+    const hit = soundAt(tOf(contentX(e)), row, HIT_PX / S.pps);
+    if (hit) return pickSound(hit, e.shiftKey || e.metaKey || e.ctrlKey);
+    if (S.playing) return seek(tOf(contentX(e))); // playing: go there and play on (a double-click then plays only that layer)
+  }
+  // a drag across the soundtrack's waveform marks a passage to loop; a click there scrubs as anywhere
+  const y = e.clientY - scroll.getBoundingClientRect().top;
+  if (S.board.audio && y >= Y.audio && y < Y.audio + mixH() && !e.target.closest('.ncard')) return startRange(e);
   startScrub(e);
 });
+
+function startRange(e) {
+  const x0 = e.clientX, [a] = snap(tOf(contentX(e)), e);
+  let moved = false;
+  scroll.setPointerCapture(e.pointerId);
+  const move = ev => {
+    if (!moved && Math.abs(ev.clientX - x0) < 4) return;
+    moved = true;
+    const [t, s] = snap(tOf(contentX(ev)), ev);
+    showSnap(s);
+    setRange(a, t);
+  };
+  const up = () => {
+    showSnap(null);
+    scroll.removeEventListener('pointermove', move); scroll.removeEventListener('pointerup', up); scroll.removeEventListener('pointercancel', up);
+    if (!moved) seek(a);
+    else if (S.range && !S.playing) seek(S.range.a);
+  };
+  scroll.addEventListener('pointermove', move);
+  scroll.addEventListener('pointerup', up);
+  scroll.addEventListener('pointercancel', up);
+}
 
 function startScrub(e) {
   const move = ev => {
@@ -750,6 +880,18 @@ function startTrim(e, clipEl) {
   scroll.addEventListener('pointercancel', up);
 }
 
+// Double-click a layer's row: play the film from there with only that layer (again: the whole mix).
+scroll.addEventListener('dblclick', e => {
+  const row = layerRowAt(e);
+  if (row >= 0) soloPlay(S.board.sound.layers[row].id, tOf(contentX(e)), false);
+});
+on('solo-play', ({ id }) => soloPlay(id, null, true));
+function soloPlay(id, t, toggle) {
+  if (!soloOnly(id, toggle)) return; // its name, when it was the only one: back to the whole mix
+  if (t != null) seek(t);
+  if (!S.playing) play();
+}
+
 // Double-click empty lane: new scene at the end.
 laneScenes.addEventListener('dblclick', e => {
   const clip = e.target.closest('.clip');
@@ -768,6 +910,9 @@ scroll.addEventListener('contextmenu', e => {
   e.preventDefault();
   const clip = e.target.closest('.clip');
   const t = tOf(contentX(e));
+  // a sound in a layer row: hear it, write a note, mark it for removal
+  const row = layerRowAt(e), sound = row >= 0 ? soundAt(t, row, HIT_PX / S.pps) : null;
+  if (sound) return soundMenu(e, sound);
   if (clip) {
     const id = clip.dataset.id;
     select(id, { keepTime: true });

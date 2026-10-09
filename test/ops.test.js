@@ -469,3 +469,48 @@ test('the Send button lists what it hands Claude, in the editor’s words', () =
   b = apply(b, [{ op: 'scene.add', scene: sample().scenes[2] }, { op: 'scene.set', id: 's2', fields: { duration: 1.5 } }]);
   assert.deepEqual(sendList(b).changes.map(r => r.w), ['status Idea → Review · version v2 → v1', 'picture', 'brief']);
 });
+
+test('the sound view: a board takes its soundtrack\'s layers, and a note can be about some of its sounds', () => {
+  const sound = { name: 'score2', duration: 60, layers: [{ id: 'glass', label: 'Glass', file: 'media/sound/x/glass.flac', peaks: 'media/sound/x/glass.flac.peaks.json', count: 2 }], events: 'media/sound/x/events.json', count: 2 };
+  const b0 = sample();
+  const r = applyOps(b0, [{ op: 'sound.set', sound }], ctx);
+  assert.deepEqual(r.board.sound, sound);
+  assert.equal(content(apply(r.board, r.inverse)).sound, null);
+  assert.throws(() => apply(b0, [{ op: 'sound.set', sound: { ...sound, layers: [] } }]), /layers/);
+  assert.throws(() => apply(b0, [{ op: 'sound.set', sound: { ...sound, layer: 1 } }]), /unknown field "layer"/);
+
+  const sounds = [{ id: 'glass-b07-1', layer: 'glass', t: 12.345, dur: 0.8, note: 'A5', label: 'pling' }, { id: 'glass-b07-2', layer: 'glass', t: 12.9, dur: null, note: null, label: '' }];
+  const b = apply(r.board, [{ op: 'note.add', note: { text: 'too bright', sounds } }]);
+  const n = b.notes.at(-1);
+  assert.equal(n.soundtrack, true, 'a note about sounds is a soundtrack note');
+  assert.equal(n.at, 12.345, 'at the first of its sounds');
+  assert.deepEqual(n.sounds, sounds);
+  assert.throws(() => apply(r.board, [{ op: 'note.add', note: { text: 'x', sounds: [{ id: 'a' }] } }]), /id and layer/);
+  assert.throws(() => apply(r.board, [{ op: 'note.add', note: { text: 'x', sounds: [{ id: 'a', layer: 'glass', pitch: 3 }] } }]), /unknown field "pitch"/);
+});
+
+test('the sound view keeps its files inside the board, and a note on sounds sits at the first of them as cleaned', () => {
+  const ok = { name: 's', duration: 60, layers: [{ id: 'glass', label: 'Glass', file: 'media/sound/x/glass.flac', peaks: 'media/sound/x/glass.flac.peaks.json' }], events: 'media/sound/x/events.json', count: 0 };
+  const b0 = sample();
+  apply(b0, [{ op: 'sound.set', sound: ok }]);
+  for (const bad of [
+    { ...ok, events: '/etc/hosts' },
+    { ...ok, layers: [{ ...ok.layers[0], file: 'media/sound/../../board.json' }] },
+    { ...ok, layers: [{ ...ok.layers[0], id: '../x' }] },
+  ]) assert.throws(() => apply(b0, [{ op: 'sound.set', sound: bad }]), /media\/sound|needs an id/);
+  const b = apply(b0, [{ op: 'note.add', note: { text: 'x', sounds: [{ id: 'a', layer: 'glass', t: 3.2 }, { id: 'b', layer: 'glass', t: 1.5 }] } }]);
+  assert.equal(b.notes.at(-1).at, 1.5);
+  const neg = apply(b0, [{ op: 'note.add', note: { text: 'x', sounds: [{ id: 'a', layer: 'glass', t: -2 }] } }]).notes.at(-1);
+  assert.deepEqual([neg.sounds[0].t, neg.at], [0, 0], 'a time before the start is the start, for the sound and the note alike');
+});
+
+test('a note can be about a passage of the soundtrack, and a sound remembers the version of the score it came from', () => {
+  const b0 = apply(sample(), [{ op: 'audio.set', audio: { file: 'media/audio/m.wav', name: 'm.wav', duration: 60 } }]);
+  const b = apply(b0, [{ op: 'note.add', note: { soundtrack: true, at: 22, to: 28.5, text: 'muddy here' } }]);
+  assert.deepEqual([b.notes.at(-1).at, b.notes.at(-1).to], [22, 28.5]);
+  assert.throws(() => apply(b0, [{ op: 'note.add', note: { soundtrack: true, at: 22, to: 20, text: 'x' } }]), /"to"/);
+  assert.throws(() => apply(b0, [{ op: 'note.add', note: { scene: 's1', at: 1, to: 2, text: 'x' } }]), /"to"/);
+  const s = apply(b0, [{ op: 'note.add', note: { text: 'x', sounds: [{ id: 'a', layer: 'glass', t: 1, set: 'media/sound/abc/events.json' }, { id: 'b', layer: 'glass', t: 2, set: '../../etc/passwd' }] } }]).notes.at(-1).sounds;
+  assert.equal(s[0].set, 'media/sound/abc/events.json');
+  assert.equal(s[1].set, undefined, 'a set that isn\'t a sound set of this board is dropped');
+});

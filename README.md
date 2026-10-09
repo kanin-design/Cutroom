@@ -155,8 +155,27 @@ editor for every shortcut.
   - Drag a scene's right edge to change its length. With snapping on, the length lands on the beat
     grid, or on cuts and markers. Alt-drag an edge to roll the cut between two scenes instead.
   - Pinch or ⌘-scroll to zoom. The ruler counts bars when the board has a tempo, or timecode.
+  - Drag the lower edge of a lane's name (Scenes, the soundtrack's waveform, its layers) to make it taller or
+    shorter; double-click the edge for automatic again.
   - Each scene has a colour line on top: its own colour, or one the editor picks so neighbours differ.
   - The Notes lane shows every open note in time. The Audio lane shows the soundtrack's waveform.
+  - **Sound view.** When Claude's score publishes its layers, the Audio lane gets a row per layer (glass,
+    bass, drums…), every sound a block at its time, with marks inside it at the height of its notes, so a
+    melody shows its shape. Click a sound to hear just it, shift-click to pick more, and write a note on the
+    picked sounds: Claude gets exactly which ones (⌥← ⌥→ step to the next sound in a layer; Esc lets go).
+  - A picked sound opens close up in the side panel: its notes lit on a keyboard, a piano roll of its layer
+    around it (click any note to hear it) and its waveform.
+  - Double-click a layer to play the film from there with only that layer (double-click its name for the whole
+    mix); M and S mute or solo layers while the film plays. **Layers** shows or hides the rows. Claude can read
+    what you're hearing and what you've picked (`sb view`).
+  - **Finding a sound:** under the picture, *Sounding now* lists the sounds at the playhead, newest first (click
+    one to pick it), and each layer's name lights up with its level as the film plays. Right-click a sound there
+    or in its row to hear it, write a note about it, or mark it for removal (a ready note, "Remove this sound.",
+    that goes to Claude when you send; the sound is struck through in red until then).
+  - **A passage:** drag across the soundtrack's waveform to loop it while the film plays; a note written then is
+    about the passage. Esc lets go.
+  - **Before and after:** when Claude publishes the score again, a note's sounds show as changed (or gone), with
+    *before* and *after* to hear the sound as it was when you wrote the note and as it is now.
   - Right-click the ruler to add a marker.
 - **Notes to Claude.** Write in the bar under the monitor (press C).
   - It always shows what the note is about: the scene you're in (click to pick another, or the whole
@@ -257,7 +276,7 @@ the editor.) `sb` is the same API as a command line. The API covers:
   read it, and ops that undo each batch.
 - **Renders and sound:** put a still or a clip on a scene from a path on disk, with the command that
   made it and the quality it was rendered at; cut a whole film into a new version of every scene in one
-  call; set the soundtrack.
+  call; set the soundtrack, and its layers and every sound in it for the sound view (`sb sound <folder>`).
 - **Talking to you:** a status line in your top bar (optionally about one shot, with progress), and
   moving your playhead to what it's talking about. Replies and notes can carry files.
 - **How each scene is made:** every scene is its own movie: its render type, what draft and final mean for

@@ -355,6 +355,17 @@ async function api(req, res, url, [a, slug, action]) {
     broadcast(L, presence(L));
     return send(res, 200, { ok: true });
   }
+  // What the editor is doing now (the playhead, and the sound view's mute, solo and picks), for the agent to read at
+  // GET /agent/boards/<slug>/view. In memory only: the latest tab to report is what the user is looking at.
+  if (action === 'view' && req.method === 'POST') {
+    const v = await json(req), ids = x => (Array.isArray(x) ? x.slice(0, 64).map(String) : []);
+    L.view = {
+      t: +v.t || 0, playing: !!v.playing, range: v.range && +v.range.b > +v.range.a ? { a: +v.range.a, b: +v.range.b } : null, scene: v.scene ? String(v.scene) : null, note: v.note ? String(v.note) : null,
+      shown: !!v.shown, mute: ids(v.mute), solo: ids(v.solo), heard: v.heard == null ? null : ids(v.heard),
+      picked: Array.isArray(v.picked) ? v.picked.slice(0, 64) : [], at: Date.now(),
+    };
+    return send(res, 200, { ok: true });
+  }
   // Ping: the user is looking for the session's window. A session waiting for notes hears it now; a busy
   // one, the moment it waits again. It answers in its own window.
   if (action === 'ping') {

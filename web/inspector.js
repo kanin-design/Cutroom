@@ -15,6 +15,7 @@ import { wire, chips, takeFiles, pendingFiles, fileRow } from './attach.js';
 import { openAnnotator, ink } from './annotate.js';
 import { claudeState } from './handoff.js';
 import { setView } from './grid.js';
+import { colorOfLayer, soundById, soundsLoaded, pickSound, soundCard, audition, setRange } from './soundview.js';
 
 const panel = $('#panel'), tabs = $('#tabs'), notesCount = $('#notesCount');
 const drafts = new Map();
@@ -159,7 +160,9 @@ function render() {
   shownView = view;
 
   const body = S.tab === 'notes' ? notesPanel() : S.tab === 'activity' ? activityPanel() : film ? filmPanel() : scenePanel();
-  panel.replaceChildren(...[body].flat(Infinity).filter(x => x instanceof Node));
+  // a picked sound, close up, above the scene or the notes: what it is and the notes it plays
+  const sound = S.tab !== 'activity' && S.soundSel?.length ? soundCard() : null;
+  panel.replaceChildren(...[sound, body].flat(Infinity).filter(x => x instanceof Node));
 
   if (key) {
     const el = panel.querySelector(`[data-key="${CSS.escape(key)}"]`);
@@ -504,9 +507,13 @@ function scopePill(n) {
   const s = findScene(b, n.scene);
   const t = noteTime(b, n);
   if (n.soundtrack && t == null) return h('span.scope.is-board', 'Whole soundtrack');
+  if (n.soundtrack && n.to != null) {
+    return h('span.scope.is-frame', { title: 'Loop this passage again', onclick: () => { select(null, { note: n.id, keepTime: true }); setRange(n.at, n.to); seek(n.at); } },
+      h('span', { html: icons.wave, style: { display: 'inline-grid' } }), `Passage ${tcOf(n.at)}–${tcOf(n.to)}`);
+  }
   if (n.soundtrack) {
     return h('span.scope.is-frame', { title: 'Go to this moment', onclick: () => { select(null, { note: n.id, keepTime: true }); seek(t); } },
-      h('span', { html: icons.wave, style: { display: 'inline-grid' } }), `Soundtrack ${tcOf(t)}`);
+      h('span', { html: icons.wave, style: { display: 'inline-grid' } }), `${n.sounds?.length ? (n.sounds.length === 1 ? 'Sound' : `${n.sounds.length} sounds`) : 'Soundtrack'} ${tcOf(t)}`);
   }
   if (!n.scene) return h('span.scope.is-board', 'Whole film');
   if (!s) return h('span.scope.is-board', 'Deleted scene');
@@ -532,6 +539,29 @@ export function noteStatus(n) {
   }
 }
 export const statusLight = n => { const st = noteStatus(n); return h('i.light', { class: st.light, 'data-tip': st.tip }); };
+
+// A sound a note is about, as it is in the score now: the same, changed since (the score was published again
+// with it moved or re-pitched), or gone from it. Click: go to it in the sound view, pick it and hear it.
+function soundChip(x) {
+  const now = soundsLoaded() ? soundById(x.id) : undefined;
+  // republished since the note: the score it was picked in is not the one on the board now
+  const newer = !!x.set && soundsLoaded() && x.set !== S.board.sound.events;
+  const gone = now === null, shifted = now && (Math.abs(now.t - x.t) > 0.005 || (now.note ?? null) !== (x.note ?? null)), moved = shifted || (now && newer);
+  const was = `${[x.id, x.layer, x.note, x.label].filter(Boolean).join(' · ')}\n${tcOf(x.t)}${x.dur != null ? ` for ${secs(x.dur)}` : ''}`;
+  return h('button.snd', {
+    class: gone ? 'gone' : moved ? 'moved' : '',
+    title: gone ? `${was}\nNot in the score any more (it was published again without this sound)`
+      : shifted ? `${was}\nChanged since: now ${tcOf(now.t)}${now.note ? `, ${now.note}` : ''} — click to go to it and hear it`
+      : moved ? `${was}\nThe score was published again since: hear before and after — click to go to it`
+      : `${was} — click to go to it and hear it`,
+    style: { '--lc': colorOfLayer(x.layer) },
+    onclick: () => (now ? pickSound(now) : toast(gone ? `${x.id} isn’t in the score any more` : 'The sound view isn’t open on this board')),
+  }, h('i'), x.id, x.note && h('em', x.note), gone && h('em', 'gone'), moved && h('em', shifted ? 'changed' : 'new version'),
+    // before and after: the sound as it was when the note was written, and as it is now
+    x.set && (moved || gone) && h('span.ab',
+      h('button', { title: 'Hear it as it was when you wrote the note', onclick: ev => { ev.stopPropagation(); audition(x, { from: x.set }); } }, 'before'),
+      now && h('button', { title: 'Hear it as it is now', onclick: ev => { ev.stopPropagation(); audition(now); } }, 'after')));
+}
 
 function noteCard(n) {
   const b = S.board;
@@ -568,6 +598,8 @@ function noteCard(n) {
       statusLight(n),
     ),
     n.render && requestLine(n),
+    // the sounds it is about (picked in the sound view): click one to hear it
+    n.sounds?.length > 0 && h('div.note-sounds', n.sounds.map(x => soundChip(x))),
     n.text && longText(n.id, h('div.note-text', n.text), n.text),
     n.markup && markupBlock(n),
     fileRow(n.files),
@@ -713,6 +745,8 @@ function activityPanel() {
 
 on('board', render);
 on('select', render);
+on('sound', render); // a new set of layers: the notes' sounds may have changed or gone
+on('sound-paint', render); // a sound picked: its card
 // Claude starting or finishing work on this scene changes its versions.
 let sayKey = '';
 on('presence', () => {

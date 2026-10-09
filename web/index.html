@@ -105,6 +105,7 @@
           <button class="icon-btn" id="tFull" title="Full-screen playback (⇧F)" data-icon="expand"></button>
         </div>
       </div>
+      <div class="now-sounds" id="nowSounds" hidden></div>
     </section>
 
     <section class="gridview" id="gridView" hidden></section>
@@ -157,7 +158,11 @@
         <div class="head head-ruler"></div>
         <div class="head head-scenes"><span data-icon="film"></span>Scenes</div>
         <div class="head head-notes"><span data-icon="note"></span><span class="head-label">Notes</span><button class="head-board" id="boardNotes" hidden></button></div>
-        <div class="head head-audio"><span data-icon="wave"></span><span class="head-label">Audio</span><button class="head-board" id="soundNotes" hidden></button></div>
+        <div class="head head-audio"><span data-icon="wave"></span><span class="head-label">Audio</span><button class="head-board" id="soundNotes" hidden></button><button class="head-layers" id="soundToggle" hidden>Layers</button></div>
+        <div class="sheads" id="soundHeads"></div>
+        <div class="lane-grip grip-scenes" id="gripScenes" title="Drag to make the scenes lane taller or shorter · double-click: automatic"></div>
+        <div class="lane-grip grip-mix" id="gripMix" title="Drag to make the soundtrack's waveform taller or shorter · double-click: automatic"></div>
+        <div class="lane-grip grip-rows" id="gripRows" title="Drag to make the layers' rows taller or shorter · double-click: automatic"></div>
       </div>
       <div class="tl-scroll" id="tlScroll">
         <div class="tl-content" id="tlContent">
