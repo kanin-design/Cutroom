@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
+import { pipeline as pipe } from 'node:stream';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import * as store from './lib/store.js';
@@ -506,11 +507,13 @@ function file(req, res, p) {
     const end = range[1] && range[2] ? Math.min(+range[2], st.size - 1) : st.size - 1;
     if (start > end || start >= st.size) return res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }).end();
     res.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${st.size}`, 'Content-Length': end - start + 1 });
-    return fs.createReadStream(p, { start, end }).pipe(res);
+    // pipe() would leave the file open when the browser drops a range request (every scrub does) and crash
+    // the server if the file went away; pipeline closes both ends either way
+    return pipe(fs.createReadStream(p, { start, end }), res, () => {});
   }
   res.writeHead(200, { ...headers, 'Content-Length': st.size });
   if (req.method === 'HEAD') return res.end();
-  fs.createReadStream(p).pipe(res);
+  pipe(fs.createReadStream(p), res, () => {});
 }
 
 function send(res, status, body, type) {
@@ -523,8 +526,10 @@ async function json(req) {
   // Requiring JSON forces a CORS preflight, which this server never grants to other origins.
   if (!String(req.headers['content-type'] || '').includes('application/json'))
     throw Object.assign(new Error('send the body as JSON with the header Content-Type: application/json'), { status: 415 });
-  let data = '';
-  for await (const chunk of req) data += chunk;
+  // joined as bytes, then decoded: a character split across two chunks must not turn into �
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const data = Buffer.concat(chunks).toString('utf8');
   return data ? JSON.parse(data) : {};
 }
 

@@ -79,7 +79,8 @@ const marked = (el, key) => { if (S.board.edits?.[key]) el.classList.add('unsent
 
 // Just enough markdown for a treatment: headings, lists, bold, italics, code and links. Escaped first.
 function markdown(src) {
-  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // quotes too: a link's address goes inside an attribute
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const inline = s => esc(s)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')

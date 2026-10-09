@@ -60,7 +60,7 @@ export function autosize(ta) {
 
 export const typing = e => {
   const t = e.target;
-  return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) && t.type !== 'range';
+  return t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable) && t.type !== 'range';
 };
 
 // ---------------------------------------------------------------- toasts, menus, popovers

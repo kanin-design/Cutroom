@@ -122,8 +122,15 @@ const unsentNotes = () => (S.board ? S.board.notes.filter(n => n.author === 'you
 const unsentChanges = () => (S.board ? editList(S.board).length : 0);
 export const waiting = (notes, changes) => [notes && plural(notes, 'note'), changes && plural(changes, 'change')].filter(Boolean).join(' and ');
 
-// Enter: add the note to the board. Claude doesn't get it until you send.
+// Enter: add the note to the board. Claude doesn't get it until you send. One at a time: a held Enter or a
+// double click on Add makes one note, not several.
+let adding = false;
 async function add() {
+  if (adding) return;
+  adding = true;
+  try { await addNote(); } finally { adding = false; }
+}
+async function addNote() {
   const body = text.value.trim();
   if (!body && !pendingFiles('bar').length) {
     bar.classList.remove('shake');

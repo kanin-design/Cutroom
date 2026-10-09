@@ -26,6 +26,8 @@ on('board', () => {
     else audio.removeAttribute('src');
     if (S.playing) syncAudio();
   }
+  // the film got shorter (a scene removed or trimmed): keep the playhead inside it
+  if (S.board && !S.playing && S.t > end()) seek(end());
 });
 on('seek', t => seek(t));
 

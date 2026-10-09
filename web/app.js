@@ -310,9 +310,14 @@ function idle() {
   return !$('#overlays').children.length;
 }
 function reloadNow() {
+  const where = { slug: S.slug, t: S.t, sel: S.sel, tab: S.tab, view: S.view };
   try {
-    sessionStorage.setItem('sb.resume', JSON.stringify({ slug: S.slug, t: S.t, sel: S.sel, tab: S.tab, view: S.view }));
-  } catch {}
+    // the undo history too: an update must not take away the way back from a delete
+    sessionStorage.setItem('sb.resume', JSON.stringify({ ...where, undo: S.undo, redo: S.redo }));
+  } catch {
+    // too big for the session's storage: keep at least the board, playhead and selection
+    try { sessionStorage.setItem('sb.resume', JSON.stringify(where)); } catch {}
+  }
   location.reload();
 }
 on('build', build => {
@@ -433,8 +438,12 @@ const CINEMA_KEYS = new Set([' ', 'j', 'J', 'k', 'K', 'l', 'L', 'ArrowLeft', 'Ar
 
 addEventListener('keydown', e => {
   if (typing(e) || !S.board) return;
+  // a dialog (the help, a viewer, the frame editor) has the keyboard: nothing edits the board behind it
+  if (document.querySelector('.modal-back, .anno-back')) return;
   const mod = e.metaKey || e.ctrlKey;
   const k = e.key;
+  // a held key repeats only moving (frames, cuts, notes, zoom), never deleting, adding, splitting or play/pause
+  if (e.repeat && !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', '=', '+', '-', '_'].includes(k)) return e.preventDefault();
   const hit = () => e.preventDefault();
   if (inCinema() && (mod || !CINEMA_KEYS.has(k))) return;
   if (mod && k.toLowerCase() === 'z') { hit(); return e.shiftKey ? redo() : undo(); }
@@ -546,6 +555,8 @@ function resume(slug) {
   if (!r || r.slug !== slug) return;
   if (r.view) setView(r.view);
   if (r.tab) S.tab = r.tab;
+  if (Array.isArray(r.undo)) S.undo = r.undo;
+  if (Array.isArray(r.redo)) S.redo = r.redo;
   if (r.sel?.scene && scene(r.sel.scene)) select(r.sel.scene, { note: r.sel.note, keepTime: true });
   seek(r.t || 0);
   toast('Editor updated');

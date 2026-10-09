@@ -277,8 +277,11 @@ function renderClips() {
       const src = mediaUrl(/\.svg$/i.test(r.file) ? r.file : r.strip || r.poster || r.file);
       for (let i = 0; i < n; i++) {
         const tile = h('div.tile', { style: { width: tileW + 'px', backgroundImage: `url("${src}")` } });
+        // a clip narrower than one tile shows that tile's middle, not its left edge
+        if (n === 1 && w < tileW) tile.style.marginLeft = `${(w - tileW) / 2}px`;
         if (r.strip && r.stripFrames) {
-          const tLocal = ((i + 0.5) * tileW / w) * s.duration;
+          // the frame under the middle of the tile's visible part (the last tile is often cut short)
+          const tLocal = ((i * tileW + Math.min(w, (i + 1) * tileW)) / 2 / w) * s.duration;
           const f = clamp(Math.floor((Math.min(tLocal, r.duration) / r.duration) * r.stripFrames), 0, r.stripFrames - 1);
           tile.style.backgroundSize = `${tileW * r.stripFrames}px ${tileH}px`;
           tile.style.backgroundPosition = `${-f * tileW}px 0`;
@@ -697,8 +700,17 @@ function startTrim(e, clipEl) {
   scroll.setPointerCapture(e.pointerId);
   let d = row.scene.duration, dn = next?.scene.duration;
   const minD = 1 / b.fps;
+  // a click on the handle (or the first click of a double-click) is not a trim: only a drag of 3 px or more is,
+  // or the snap alone would move the scene's end onto the beat grid
+  let moved = false;
+  const r0 = clipEl.getBoundingClientRect();
+  tip.style.left = r0.right + 'px';
+  tip.style.top = r0.top + 'px';
+  tip.textContent = `${secs(d)} · ${Math.round(d * b.fps)}f`;
 
   const move = ev => {
+    if (!moved && Math.abs(ev.clientX - x0) < 3 && scroll.scrollLeft === sl0) return;
+    moved = true;
     const raw = row.start + row.scene.duration + (ev.clientX - x0 + scroll.scrollLeft - sl0) / S.pps;
     let [endT, snapped] = snap(raw, ev, { quantize: true, exclude: row.end });
     endT = snapFrame(b, endT);
@@ -719,8 +731,6 @@ function startTrim(e, clipEl) {
     const beats = b.bpm ? ` · ${plural(+(d / (60 / b.bpm)).toFixed(2), 'beat')}` : '';
     tip.textContent = `${secs(d)} · ${Math.round(d * b.fps)}f${beats}${roll ? ` | next ${secs(dn)}` : ''}`;
   };
-  move(e);
-
   const up = async () => {
     scroll.removeEventListener('pointermove', move);
     scroll.removeEventListener('pointerup', up);

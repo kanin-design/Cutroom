@@ -57,7 +57,14 @@ export const actions = {
     const next = S.board.scenes[Math.min(i, S.board.scenes.length - 1)];
     S.sel = { scene: next?.id ?? null, note: null };
     emit('select');
-    toast(`Deleted “${s.title}” — ⌘Z to undo`);
+    // the toast undoes this delete, even after other edits (⌘Z undoes the latest edit)
+    const step = S.undo.at(-1);
+    toast(`Deleted “${s.title}” — click to undo (⌘Z)`, { ms: 8000, onclick: async () => {
+      const k = S.undo.lastIndexOf(step);
+      if (k < 0) return;
+      S.undo.splice(k, 1);
+      if (await commit(step.ops, { undoable: false })) select(id);
+    } });
   },
 
   async setStatus(st, id = S.sel.scene) {
