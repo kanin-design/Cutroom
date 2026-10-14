@@ -78,20 +78,30 @@ function noteSounds() {
   return new Set(n?.sounds?.map(x => x.id) || []);
 }
 
-async function load() {
-  const x = S.board?.sound;
-  if (!x) {
-    if (eventsFor) { eventsFor = null; byLayer = new Map(); byId = new Map(); peaks.clear(); buffers.clear(); setPicks([]); stopStems(); }
-    return;
-  }
-  if (eventsFor === x.events) return;
-  eventsFor = x.events;
+// Let go of the set shown so far: its sounds, waveforms and stems, and the picks, mute and solo made in it.
+function forget() {
+  eventsFor = null;
+  byLayer = new Map();
+  byId = new Map();
+  range.clear();
   peaks.clear();
   buffers.clear();
   stopStems();
   S.soundMute.clear();
   S.soundSolo.clear();
-  setPicks([], { quiet: true }); // the picks were sounds of the earlier set
+  lastPick = null;
+  setPicks([], { quiet: true });
+}
+
+async function load() {
+  const x = S.board?.sound;
+  if (!x) {
+    if (eventsFor) { forget(); emit('sound-paint'); }
+    return;
+  }
+  if (eventsFor === x.events) return;
+  forget(); // the picks were sounds of the earlier set
+  eventsFor = x.events;
   let events = [];
   try { events = await (await fetch(mediaUrl(x.events))).json(); } catch {}
   if (eventsFor !== x.events) return;
@@ -110,7 +120,8 @@ async function load() {
   }
 }
 on('board', load);
-on('open', () => { eventsFor = null; load(); });
+// another board: nothing of the last one's sound view comes with it, the looped passage too (its times were that film's)
+on('open', () => { forget(); S.range = null; load(); });
 
 // ---------------------------------------------------------------- drawing (into the timeline's canvas)
 
@@ -255,9 +266,10 @@ export const listening = () => !soundOpen() || (!S.soundMute.size && !S.soundSol
   mute: [...S.soundMute], solo: [...S.soundSolo], heard: layers().filter(l => audible(l.id)).map(l => l.id),
 };
 
-// The picked sounds as a note carries them.
-const asNoteSound = ({ id, layer, t, dur, note, label }) => ({ id, layer, t, dur: dur ?? null, note: note ?? null, label: label || '', set: S.board.sound.events });
-export const pickedForNote = () => S.soundSel.map(asNoteSound);
+// The picked sounds as a note carries them, with the set they were picked in. None while the board's set isn't the
+// one loaded (a board with no soundtrack, or the moment a board opens).
+const asNoteSound = ({ id, layer, t, dur, note, label }) => ({ id, layer, t, dur: dur ?? null, note: note ?? null, label: label || '', set: eventsFor });
+export const pickedForNote = () => (soundsLoaded() ? S.soundSel.map(asNoteSound) : []);
 
 // ---------------------------------------------------------------- right-click a sound: hear it, a note, removal
 // "Mark for removal" writes the note for you ("Remove this sound."): it goes to Claude with your other notes when
