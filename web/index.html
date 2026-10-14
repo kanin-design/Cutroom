@@ -51,7 +51,7 @@
     <button class="kind-chip has-card" id="renderKind" hidden></button>
     <div class="board-meta" id="boardMeta"></div>
     <div class="spacer"></div>
-    <button class="update-chip" id="updateChip" hidden title="The storyboard was updated while this tab was open">Editor updated · Reload</button>
+    <button class="update-chip" id="updateChip" hidden title="Cutroom was updated while this tab was open: click to refresh (the board, playhead and selection stay)">Update · Refresh</button>
     <div class="presence has-card connect" id="presence" role="button" tabindex="0" hidden>
       <span class="spark" data-icon="spark"></span>
       <span class="presence-name">Claude</span>
@@ -69,6 +69,12 @@
     <button class="icon-btn" id="helpBtn" title="Keyboard shortcuts (?)" data-icon="keyboard"></button>
     <button class="icon-btn" id="fullBtn" title="Full screen: the editor fills the screen, like an app" data-icon="expand"></button>
   </header>
+  <div class="update-bar" id="updateBar" role="status" hidden>
+    <span class="update-dot"></span>
+    <span class="update-text"><b>Cutroom has been updated.</b> Refresh to use the new version: your board, playhead and selection stay.</span>
+    <button class="update-go" id="updateGo">Refresh</button>
+    <button class="update-later" id="updateLater" title="Not now (the chip in the top bar refreshes later)">Later</button>
+  </div>
 
   <main class="workspace" id="workspace">
     <section class="stage" id="stage">
@@ -100,6 +106,7 @@
           <button class="icon-btn toggle" id="tLoop" title="Loop the selected scene (⇧L)" data-icon="loop"></button>
         </div>
         <div class="transport-right">
+          <button class="sync-btn" id="tSync">Sync</button>
           <button class="icon-btn toggle" id="tMute" title="Mute (M)" data-icon="volume"></button>
           <button class="icon-btn toggle" id="tPanel" title="Hide the side panel for a bigger picture (I)" data-icon="panel"></button>
           <button class="icon-btn" id="tFull" title="Full-screen playback (⇧F)" data-icon="expand"></button>

@@ -7,6 +7,8 @@ import { layout, activeRender, totalDuration, snapFrame, noteTime, noteState, pl
 import { $, h, clamp, secs, tc, menu, ask, authorName } from './util.js';
 import { icons } from './icons.js';
 import { seek, end, pause, play } from './player.js';
+// the soundtrack's time on the film's: shifted by the listening offset (the sync control), so what you see is what you hear
+const sOff = () => S.audioOffset || 0;
 import { STATUS_COLOR, sceneColor } from './viewer.js';
 import { actions } from './actions.js';
 import { noteStatus } from './inspector.js';
@@ -217,9 +219,10 @@ function draw() {
     const mid = Y.audio + mixH() / 2, amp = mixH() / 2 - 3;
     const rate = peaks.rate;
     ctx.fillStyle = 'rgba(52,150,120,0.13)';
-    ctx.fillRect(X(0), Y.audio, X(b.audio.duration) - X(0), mixH());
-    for (let x = Math.max(0, Math.floor(X(0))); x < Math.min(W, X(b.audio.duration)); x++) {
-      const a = Math.floor(tOf(x + sl) * rate), z = Math.max(a + 1, Math.floor(tOf(x + 1 + sl) * rate));
+    const o = sOff();
+    ctx.fillRect(X(o), Y.audio, X(b.audio.duration + o) - X(o), mixH());
+    for (let x = Math.max(0, Math.floor(X(o))); x < Math.min(W, X(b.audio.duration + o)); x++) {
+      const a = Math.floor((tOf(x + sl) - o) * rate), z = Math.max(a + 1, Math.floor((tOf(x + 1 + sl) - o) * rate));
       let p = 0, r = 0;
       for (let i = a; i < z && i < peaks.peak.length; i++) {
         if (peaks.peak[i] > p) p = peaks.peak[i];
@@ -234,7 +237,7 @@ function draw() {
   }
 
   // the soundtrack's layers, a row each under the mix (the sound view)
-  drawLayers(ctx, { top: layerTop(), W, H, X, t0, t1, tOf: x => tOf(x + sl) });
+  drawLayers(ctx, { top: layerTop(), W, H, X: t => X(t + sOff()), t0: t0 - sOff(), t1: t1 - sOff(), tOf: x => tOf(x + sl) - sOff() });
 
   // a passage marked on the soundtrack: it loops while the film plays
   if (S.range) {
@@ -467,13 +470,13 @@ function renderSoundNotes() {
   const shown = b.notes.filter(n => n.soundtrack && (!n.resolved || S.sel.note === n.id));
   const timed = shown.filter(n => n.at != null).sort((p, q) => p.at - q.at);
   soundLane.replaceChildren(...timed.flatMap((n, i) => {
-    const x = xOf(n.at), next = timed[i + 1];
+    const x = xOf(n.at + sOff()), next = timed[i + 1];
     const sel = S.sel.note === n.id, st = cardState(n);
     return [
       h('div.nline.snline', { class: sel ? 'sel' : '', style: { left: x + 'px', '--pc': who(n) } }),
       h('div.ncard.frame.snote', {
         class: `${st} ${sel ? 'sel' : ''}`,
-        style: { left: x - 9 + 'px', width: clamp(next ? xOf(next.at) - x - 4 : 240, 26, 240) + 'px', '--pc': who(n) },
+        style: { left: x - 9 + 'px', width: clamp(next ? xOf(next.at + sOff()) - x - 4 : 240, 26, 240) + 'px', '--pc': who(n) },
         title: `#${num(n)} ${authorName(n.author)} · the soundtrack at ${tc(n.at, b.fps)} · ${noteStatus(n).label}\n${n.text}`,
         onpointerdown: e => e.stopPropagation(),
         onclick: () => actions.openNote(n),
@@ -691,7 +694,7 @@ scroll.addEventListener('pointerdown', e => {
   const row = layerRowAt(e);
   if (row >= 0) {
     if (e.detail >= 2) return;
-    const hit = soundAt(tOf(contentX(e)), row, HIT_PX / S.pps);
+    const hit = soundAt(tOf(contentX(e)) - sOff(), row, HIT_PX / S.pps);
     if (hit) return pickSound(hit, e.shiftKey || e.metaKey || e.ctrlKey);
     if (S.playing) return seek(tOf(contentX(e))); // playing: go there and play on (a double-click then plays only that layer)
   }

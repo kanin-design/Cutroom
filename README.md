@@ -177,6 +177,10 @@ editor for every shortcut.
   - **Before and after:** when Claude publishes the score again, a note's sounds show as changed (or gone), with
     *before* and *after* to hear the sound as it was when you wrote the note and as it is now.
   - Right-click the ruler to add a marker.
+- **Sync** (beside Mute): play the soundtrack a little later or earlier than the picture, in 10 ms or one-frame
+  steps, to find by ear how far something should move (words lighting up with the lyrics). It shows what that
+  means ("the picture belongs 120 ms earlier") for you to tell Claude; it's only for listening here, never saved
+  or sent, and back to 0 on every board you open.
 - **Notes to Claude.** Write in the bar under the monitor (press C).
   - It always shows what the note is about: the scene you're in (click to pick another, or the whole
     board). Turn on **Frame** (F) for the exact frame you're on.

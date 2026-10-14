@@ -47,6 +47,9 @@ export function sceneColor(s) {
   if (b && (colors.rev !== b.rev || colors.slug !== S.slug)) colors = { rev: b.rev, slug: S.slug, map: sceneColors(b) };
   return colors.map.get(s.id) || s.color || COLORS[0];
 }
+// The soundtrack's time at film time t: the Sync control's listening offset (S.audioOffset, this browser only)
+// plays it later (+) or earlier (−) than the picture.
+export const soundTime = (t = S.t) => t - (S.audioOffset || 0);
 export const mediaUrl = rel => `/media/${encodeURIComponent(S.slug)}/${rel.replace(/^media\//, '')}`;
 
 export function select(sceneId, { note = null, keepTime = false } = {}) {

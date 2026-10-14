@@ -1,6 +1,7 @@
 // Boot, top bar, board switching, keyboard and the bits of chrome that tie the panels together.
 
 import { clearSounds, clearLayerStates, clearRange, stepPick } from './soundview.js';
+import './sync.js';
 import { S, on, emit, openBoard, undo, redo, select, commit, scene, activeSay, holding } from './store.js';
 import { $, h, menu, closeMenu, modal, toast, typing, clamp, tc, ago, ask, authorName } from './util.js';
 import { hydrateIcons, icons } from './icons.js';
@@ -299,17 +300,12 @@ on('board', e => {
 on('annotate', () => annotateHere());
 
 // ---------------------------------------------------------------- updates
-// The server says which build of the editor it serves. If this tab is running an older one, offer
-// a reload, and do it by itself at the first idle moment, keeping the board, playhead and selection.
+// The server says which build of the editor it serves. If this tab is running an older one, it says so plainly,
+// like a web app asking to be refreshed: a bar under the top bar with Refresh, which keeps the board, playhead,
+// selection and undo. It never reloads under you while you look at it; only a tab in the background reloads by
+// itself. Closing the bar leaves the small chip in the top bar.
 const BUILD = document.querySelector('meta[name="sb-build"]')?.content;
-let reloading = false;
-function idle() {
-  if (S.playing || holding()) return false; // never under a save, a markup or words not yet added
-  if (document.visibilityState === 'hidden') return true;
-  if (typing({ target: document.activeElement })) return false;
-  if (document.querySelector('.clip.dragging, .clip.trimming, .gcard.dragging, .modal-back')) return false;
-  return !$('#overlays').children.length;
-}
+let updatePending = false;
 function reloadNow() {
   const where = { slug: S.slug, t: S.t, sel: S.sel, tab: S.tab, view: S.view };
   try {
@@ -321,14 +317,19 @@ function reloadNow() {
   }
   location.reload();
 }
+// a tab nobody is looking at updates by itself, unless something is still being saved or written
+const reloadUnseen = () => {
+  if (updatePending && document.visibilityState === 'hidden' && !S.playing && !holding()) reloadNow();
+};
+document.addEventListener('visibilitychange', reloadUnseen);
 on('build', build => {
-  if (!BUILD || BUILD.startsWith('%') || build === BUILD || reloading) return;
-  reloading = true;
-  const chip = $('#updateChip');
-  chip.hidden = false;
-  chip.onclick = reloadNow;
-  const attempt = () => (idle() ? reloadNow() : setTimeout(attempt, 1500));
-  setTimeout(attempt, 1200);
+  if (!BUILD || BUILD.startsWith('%') || build === BUILD || updatePending) return;
+  updatePending = true;
+  const bar = $('#updateBar'), chip = $('#updateChip');
+  chip.onclick = $('#updateGo').onclick = reloadNow;
+  $('#updateLater').onclick = () => { bar.hidden = true; chip.hidden = false; };
+  bar.hidden = false;
+  reloadUnseen();
 });
 
 // ---------------------------------------------------------------- transport + toolbar

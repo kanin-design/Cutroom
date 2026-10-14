@@ -144,6 +144,21 @@ input[type="range"]::-webkit-slider-thumb {
   background: rgba(134, 169, 255, 0.12); color: var(--st-review);
 }
 .update-chip:hover { background: rgba(134, 169, 255, 0.2); }
+/* a new build of the editor: asks to be refreshed, like a web app does */
+.update-bar {
+  position: fixed; top: 50px; left: 16px; right: 16px; margin: 0 auto; width: fit-content; z-index: 320;
+  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; border-radius: var(--r-card);
+  background: #1d2440; border: 1px solid rgba(134, 169, 255, 0.45); color: var(--text); font-size: 12.5px;
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55); animation: pop 0.2s var(--ease);
+}
+.update-bar[hidden] { display: none; }
+.update-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--st-review); flex: none; box-shadow: 0 0 0 4px rgba(134, 169, 255, 0.18); }
+.update-text { min-width: 0; }
+.update-text b { font-weight: 600; }
+.update-go { height: 26px; padding: 0 14px; border-radius: var(--r); background: var(--st-review); color: #0b0f1e; font-weight: 600; flex: none; }
+.update-go:hover { filter: brightness(1.08); }
+.update-later { height: 26px; padding: 0 8px; border-radius: var(--r); color: var(--text-2); flex: none; }
+.update-later:hover { color: var(--text); background: rgba(255, 255, 255, 0.07); }
 .presence {
   display: inline-flex; align-items: center; gap: 9px; height: 26px; min-width: 0; max-width: 600px;
   font-size: 12px; white-space: nowrap; color: var(--claude); transition: opacity 0.3s;
@@ -1328,3 +1343,19 @@ body.hud .cinema-hud { opacity: 1; }
   :root { --insp-w: 300px; }
   .board-meta, .presence-say, .presence-prog { display: none; }
 }
+
+/* Sync, beside Mute: the soundtrack later or earlier, to find by ear how far the picture should move (a listening aid) */
+.sync-btn { height: 24px; padding: 0 8px; border-radius: 6px; font: 600 10.5px var(--mono); color: var(--muted); background: rgba(255, 255, 255, 0.06); }
+.sync-btn:hover { color: var(--text); background: rgba(255, 255, 255, 0.12); }
+.sync-btn.on { color: #1a1206; background: #ffc45a; }
+.sync-card { width: 290px; padding: 10px 12px 12px; }
+.sync-card .sync-value { margin: 4px 0 2px; font: 600 22px var(--mono); color: var(--muted); }
+.sync-card .sync-value.on { color: #ffc45a; }
+.sync-card .sync-means { font-size: 12px; line-height: 1.45; color: var(--text); margin-bottom: 8px; }
+.sync-card .sync-row { display: flex; gap: 5px; margin-top: 6px; align-items: center; }
+.sync-card .sync-row button { flex: 1; justify-content: center; padding: 4px 0; border-radius: 6px; font: 11px var(--mono); background: rgba(255, 255, 255, 0.07); }
+.sync-card .sync-row button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.14); }
+.sync-card .sync-in { width: 90px; flex: none; padding: 4px 6px; border-radius: 6px; font: 12px var(--mono); color: var(--text); background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line-2); }
+.sync-card .sync-unit { font: 11px var(--mono); color: var(--muted); }
+.sync-card .sync-reset { flex: none !important; padding: 4px 12px !important; }
+.sync-card .sync-hint { margin-top: 9px; font-size: 10.5px; line-height: 1.4; color: var(--faint); }

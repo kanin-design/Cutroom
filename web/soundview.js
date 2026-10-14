@@ -7,7 +7,7 @@
 // Two events: 'sound' when the rows change (a new set, shown or hidden: the timeline lays out again) and
 // 'sound-paint' when only what they show changes (picks, mute and solo, a layer's waveform arriving: a redraw).
 
-import { S, on, emit, mediaUrl, commit } from './store.js';
+import { S, on, emit, mediaUrl, commit, soundTime } from './store.js';
 import { h, toast, menu } from './util.js';
 
 export const MIX_H = 46;  // the mix's waveform, above the layers
@@ -241,7 +241,7 @@ export function pickSound(e, add = false) {
   if (add && had) return;
   lastPick = e;
   // stopped: the playhead goes to it, so the picture shows what plays with it
-  if (!S.playing && !add) emit('seek', e.t);
+  if (!S.playing && !add) emit('seek', e.t + (S.audioOffset || 0));
   audition(e);
 }
 
@@ -428,7 +428,7 @@ async function startStems() {
     const bufs = await Promise.all(ls.map(buffer));
     if (!wanted()) { if (!running) setStems(false); return; }
     try { audition0?.stop(); } catch {} // a sound heard on its own stops when the layers play
-    const a = audioCtx(), at = a.currentTime + LEAD, t0 = S.t + LEAD * S.rate;
+    const a = audioCtx(), at = a.currentTime + LEAD, t0 = soundTime() + LEAD * S.rate;
     const nodes = new Map();
     ls.forEach((l, i) => {
       const g = a.createGain();
@@ -454,7 +454,7 @@ function syncStems() {
   if (!running) { if (heardKey() !== failedKey) void startStems(); return; }
   // other layers to hear, a seek, a loop or a change of speed: start again from where the film is
   const now = running.t0 + (ac.currentTime - running.at) * running.rate;
-  if (running.key !== heardKey() || running.rate !== S.rate || Math.abs(now - S.t) > DRIFT) { stopStems(); startStems(); }
+  if (running.key !== heardKey() || running.rate !== S.rate || Math.abs(now - soundTime()) > DRIFT) { stopStems(); startStems(); }
 }
 on('play', () => { if (S.playing) { try { audition0?.stop(); } catch {} } syncStems(); });
 on('rate', syncStems);
@@ -623,7 +623,7 @@ let nowEl = null, nowKey = '';
 export function renderNow(el = nowEl ?? document.getElementById('nowSounds')) {
   nowEl = el;
   if (!el) return;
-  const list = soundOpen() ? soundingAt(S.t) : [];
+  const list = soundOpen() ? soundingAt(soundTime()) : [];
   const key = list.map(e => e.id).join('|') + `|${S.soundSel.map(e => e.id).join(',')}|${[...markedForRemoval()].join(',')}`;
   if (key === nowKey) return;
   nowKey = key;
@@ -649,7 +649,7 @@ function meters() {
     if (!el) return;
     let v = 0;
     if (p) {
-      const k = Math.floor(S.t * p.rate), src = p.rms || p.peak;
+      const k = Math.floor(soundTime() * p.rate), src = p.rms || p.peak;
       for (let j = Math.max(0, k - 4); j <= k && j < src.length; j++) v = Math.max(v, src[j]);
     }
     el.style.transform = `scaleX(${Math.min(1, (v / 255) * (p?.rms ? 1.8 : 1))})`;

@@ -2,7 +2,7 @@
 // sits on the music); otherwise the wall clock is. Everything else follows S.t via 'time' events.
 // S.rate is the speed: 1 normally, and 2, 4, 8 or backwards while shuttling with J and L.
 
-import { S, on, emit, total, mediaUrl, sceneRange } from './store.js';
+import { S, on, emit, total, mediaUrl, sceneRange, soundTime } from './store.js';
 import { clamp } from './util.js';
 
 const audio = new Audio();
@@ -11,9 +11,22 @@ let raf = 0, wallStart = 0, tStart = 0, audioSrc = null;
 // The soundtrack only drives the clock while it is really advancing; if the browser blocks it
 // or it stalls, the wall clock carries on and the audio catches up when it runs again.
 let audioRunning = false, audioBlocked = false;
+
+// A listening aid, in this browser only (never saved, never sent): play the soundtrack this much later (+) or
+// earlier (−) than the picture, to find by ear how far something in the picture should move. S.t is the film's
+// time; the soundtrack is at S.t − offset.
+S.audioOffset = 0;
+export { soundTime };
+export function setAudioOffset(v) {
+  S.audioOffset = Math.round(clamp(+v || 0, -2, 2) * 1000) / 1000;
+  emit('offset');
+  if (S.playing) syncAudio();
+}
+on('open', () => { S.audioOffset = 0; emit('offset'); });
+
 audio.addEventListener('playing', () => {
   audioRunning = true;
-  if (S.playing && Math.abs(audio.currentTime - S.t) > 0.05) audio.currentTime = S.t;
+  if (S.playing && Math.abs(audio.currentTime - soundTime()) > 0.05) audio.currentTime = soundTime();
 });
 for (const e of ['pause', 'waiting', 'ended', 'emptied']) audio.addEventListener(e, () => { audioRunning = false; });
 
@@ -47,7 +60,7 @@ function range() {
   return [0, end()];
 }
 
-const audioLive = () => audioSrc && S.board.audio && S.t < (S.board.audio.duration || 0) - 0.02;
+const audioLive = () => audioSrc && S.board.audio && soundTime() >= 0 && soundTime() < (S.board.audio.duration || 0) - 0.02;
 // The soundtrack plays along forwards up to 4×; faster, or backwards, it is silent.
 const audioRate = () => (S.rate > 0 && S.rate <= 4 ? S.rate : 0);
 
@@ -57,7 +70,7 @@ function syncAudio() {
   const r = audioRate();
   if (S.playing && r && audioLive() && !audioBlocked) {
     if (audio.playbackRate !== r) audio.playbackRate = r;
-    if (Math.abs(audio.currentTime - S.t) > 0.03 * r) audio.currentTime = S.t;
+    if (Math.abs(audio.currentTime - soundTime()) > 0.03 * r) audio.currentTime = soundTime();
     // only the browser refusing sound blocks it; a play() cut short by a pause (J, L) is not that
     if (audio.paused) audio.play().catch(e => { if (e?.name === 'NotAllowedError') audioBlocked = true; });
   } else if (!audio.paused) audio.pause();
@@ -136,7 +149,7 @@ function tick() {
   const now = performance.now();
   let t;
   if (audioRate() && audioRunning && !audio.paused && audioLive()) {
-    t = audio.currentTime;
+    t = audio.currentTime + (S.audioOffset || 0);
     wallStart = now;
     tStart = t;
   } else t = tStart + ((now - wallStart) / 1000) * S.rate;
