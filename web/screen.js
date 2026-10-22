@@ -1,6 +1,6 @@
 // Full screen, two ways. The button in the top bar puts the whole editor on the screen, like an app;
 // in Chrome, Esc then stays with the editor (hold it to leave full screen). Full-screen playback
-// (⇧F, or the button under the picture) shows the picture alone, for watching the cut.
+// (F, or the button under the picture) shows the picture alone, for watching the cut.
 
 import { S, on, here } from './store.js';
 import { $, h, tc, toast } from './util.js';

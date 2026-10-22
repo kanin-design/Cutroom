@@ -595,7 +595,17 @@ on('board', e => {
 on('select', () => { renderNotes(); renderSoundNotes(); renderClips(); requestDraw(); });
 // the sound view: its rows change the Audio lane's height; picks and mutes redraw it
 const soundToggle = $('#soundToggle');
-soundToggle.addEventListener('click', () => { grownFor = null; setSoundOpen(!soundOpen()); });
+soundToggle.addEventListener('click', () => {
+  grownFor = null;
+  const open = !soundOpen();
+  setSoundOpen(open);
+  // hidden again: the timeline goes back to the height it had before it grew for them
+  if (!open && heightBefore != null) {
+    const back = heightBefore;
+    heightBefore = null;
+    if (tlHeight() > back) emit('set-timeline', back);
+  }
+});
 // A layer's row: the height you set, or as tall as the room under the mix allows: 8–15 px, or up to 28 when
 // you've made the scenes lane smaller (a score can have 17 layers). Never so tall the rows don't fit.
 function layerRowH() {
@@ -605,15 +615,21 @@ function layerRowH() {
   if (LANES.row != null) return clamp(Math.min(LANES.row, fit), 6, 40);
   return clamp(Math.floor(layerRoom() / n), 8, LANES.scenes != null ? 28 : LH);
 }
-// Showing the layers makes the timeline taller when they'd be cramped (once a set; drag the splitter back after)
-let grownFor = null;
+// Showing the layers makes the timeline as tall as they need, every row at its full height (as far as the window
+// allows); hiding them shrinks it back to what it was. Once a set when a board opens with them shown, and on
+// every click of the Layers button.
+let grownFor = null, heightBefore = null;
+const tlHeight = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tl-h')) || 272;
 function growForLayers() {
   const key = soundOpen() ? `${S.slug}|${S.board.sound.events}` : null;
   if (!key || key === grownFor) return;
   grownFor = key;
-  const want = layerRows() * ROW_COMFY - layerRoom();
-  if (want > 0) emit('grow-timeline', want);
+  const want = layerRows() * Math.max(ROW_COMFY, LANES.row ?? LH) - layerRoom();
+  if (want <= 0) return;
+  if (heightBefore == null) heightBefore = tlHeight();
+  emit('grow-timeline', want);
 }
+on('open', () => { heightBefore = null; });
 function renderSound() {
   const has = !!S.board?.sound;
   soundToggle.hidden = !has;
@@ -659,9 +675,9 @@ function gridUnit() {
 }
 
 // Snap t to a cut or marker within 8 px; with `quantize`, otherwise land on the beat grid
-// (like a DAW). Returns [t, cutOrMarker|null]. Hold ⌘ to skip.
-function snap(t, e, { quantize = false, exclude = null } = {}) {
-  if (!S.snap || e?.metaKey) return [t, null];
+// (like a DAW). Returns [t, cutOrMarker|null]. Hold ⌘ to skip; with `shiftFree` (the playhead), ⇧ too.
+function snap(t, e, { quantize = false, exclude = null, shiftFree = false } = {}) {
+  if (!S.snap || e?.metaKey || (shiftFree && e?.shiftKey)) return [t, null];
   const tol = 8 / S.pps;
   let best = null, bd = tol;
   for (const c of snapCandidates(exclude)) { const d = Math.abs(c - t); if (d < bd) { bd = d; best = c; } }
@@ -727,8 +743,9 @@ function startRange(e) {
 }
 
 function startScrub(e) {
+  // ⇧ lets go of the cuts, for the first frames of a scene: the playhead goes frame by frame wherever it is dragged
   const move = ev => {
-    const [t, s] = snap(tOf(contentX(ev)), ev);
+    const [t, s] = snap(tOf(contentX(ev)), ev, { shiftFree: true });
     showSnap(s);
     seek(t);
   };

@@ -78,6 +78,8 @@ function syncAudio() {
 
 export function seek(t) {
   const [a, b] = S.playing ? range() : [0, end()];
+  // stopped, the playhead is always on a frame: the one the picture, the timecode and a frame note all mean
+  if (!S.playing && S.board) t = Math.round(t * S.board.fps) / S.board.fps;
   S.t = clamp(t, S.playing ? a : 0, Math.max(b, 0));
   if (S.playing) {
     wallStart = performance.now();

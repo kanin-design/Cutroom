@@ -2,6 +2,7 @@
 
 import { clearSounds, clearLayerStates, clearRange, stepPick } from './soundview.js';
 import './sync.js';
+import { arrow } from './jump.js';
 import { S, on, emit, openBoard, undo, redo, select, commit, scene, activeSay, holding } from './store.js';
 import { $, h, menu, closeMenu, modal, toast, typing, clamp, tc, ago, ask, authorName } from './util.js';
 import { hydrateIcons, icons } from './icons.js';
@@ -375,6 +376,7 @@ try {
 } catch {}
 // The sound view asks for room for its layers: grow the timeline by that much (the monitor keeps 260 px).
 on('grow-timeline', d => setTimelineHeight((parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--tl-h')) || 272) + d));
+on('set-timeline', setTimelineHeight); // back to a height it had (the layers hidden again)
 // Double-click: a big monitor (the smallest timeline), and back to the size it had.
 let lastTimeline = 272;
 splitter.addEventListener('dblclick', () => {
@@ -422,15 +424,15 @@ on('panel', () => setPanel(true));
 // ---------------------------------------------------------------- keyboard
 
 const KEYS = [
-  ['Space', 'Play / pause'], ['J K L', 'Back, stop, forward (again for 2×, 4×, 8×)'], ['← →', 'Step one frame'], ['⇧ ← →', 'Step one second'],
+  ['Space', 'Play / pause'], ['J K L', 'Back, stop, forward (again for 2×, 4×, 8×)'], ['← →', 'Stopped: one frame (⇧ ten). Playing: jump a second (⇧ ten), hold to go faster'],
   ['↑ ↓', 'Previous / next cut'], ['⇧↑ ⇧↓', 'Previous / next note'], ['Home End', 'Start / end'], ['Click the timecode', 'Type a time: 2115, or +12 frames'],
-  ['⇧L', 'Loop the selected scene'], ['M', 'Mute'], ['⇧F', 'Full-screen playback'], ['C', 'Add a note'], ['⌘⏎', 'Send your notes to Claude'],
-  ['F', 'Note about this exact frame (on/off)'], ['A', 'Mark up this frame (or double-click the picture)'],
+  ['⇧L', 'Loop the selected scene'], ['M', 'Mute'], ['F', 'Full-screen playback (on/off)'], ['C', 'Add a note'], ['⌘⏎', 'Send your notes to Claude'],
+  ['⇧F', 'Note about this exact frame (on/off)'], ['A', 'Mark up this frame (or double-click the picture)'],
   ['R', 'Ask Claude for a render: the film, a scene or a frame'], ['I', 'Hide or show the side panel'],
   ['N', 'New scene after the selection'], ['S', 'Split at the playhead'], ['⌘D', 'Duplicate scene'], ['⌫', 'Delete scene'],
   ['1 – 4', 'Status: idea, draft, review, approved'], ['[ ]', 'Select previous / next scene'], ['⌘Z  ⇧⌘Z', 'Undo / redo'], ['= −', 'Zoom in / out'],
   ['⇧Z', 'Fit timeline'], ['G', 'Edit / Board view'], ['Pinch · ⌘ scroll', 'Zoom the timeline'], ['Alt-drag an edge', 'Roll a cut'],
-  ['⌘ while dragging', 'No snapping'], ['Esc', 'Let go: picked sounds, the looped passage, mute and solo, then the selection'], ['Drag on the waveform', 'Loop that passage of the soundtrack'],
+  ['⌘ while dragging', 'No snapping'], ['⇧ while dragging the playhead', 'No snapping to cuts'], ['Esc', 'Let go: picked sounds, the looped passage, mute and solo, then the selection'], ['Drag on the waveform', 'Loop that passage of the soundtrack'],
   ['⌥← ⌥→', 'Picked sound: the one before / after it in its layer'],
 ];
 
@@ -439,7 +441,7 @@ function showKeys() {
 }
 
 // Watching full screen, only the playback keys work: nothing gets edited out of sight.
-const CINEMA_KEYS = new Set([' ', 'j', 'J', 'k', 'K', 'l', 'L', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'm', 'M', 'F', 'Escape']);
+const CINEMA_KEYS = new Set([' ', 'j', 'J', 'k', 'K', 'l', 'L', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'm', 'M', 'f', 'F', 'Escape']);
 
 addEventListener('keydown', e => {
   if (typing(e) || !S.board) return;
@@ -467,8 +469,8 @@ addEventListener('keydown', e => {
       if (!e.shiftKey) return shuttle(1);
       S.loop = !S.loop;
       return emit('loop');
-    case 'ArrowLeft': hit(); return actions.step(e.shiftKey ? -S.board.fps : -1);
-    case 'ArrowRight': hit(); return actions.step(e.shiftKey ? S.board.fps : 1);
+    case 'ArrowLeft': hit(); return arrow(e, -1);
+    case 'ArrowRight': hit(); return arrow(e, 1);
     case 'ArrowUp': hit(); return e.shiftKey ? actions.nextNote(-1) : actions.nextCut(-1);
     case 'ArrowDown': hit(); return e.shiftKey ? actions.nextNote(1) : actions.nextCut(1);
     case 'Home': hit(); return seek(0);
@@ -476,8 +478,10 @@ addEventListener('keydown', e => {
     case 'm': case 'M': return setMuted(!S.muted);
     case 'c': case 'C': hit(); return focusComposer();
     case 'f': case 'F':
-      if (e.shiftKey) { hit(); return setCinema(!inCinema()); }
-      return setFrame(!S.noteFrame);
+      hit();
+      // F, as in a media player: the picture full screen, and back. ⇧F: the note is about this exact frame.
+      if (e.shiftKey && !inCinema()) return setFrame(!S.noteFrame);
+      return setCinema(!inCinema());
     case 'a': case 'A': case 'p': case 'P': hit(); return annotateHere();
     case 'n': case 'N': hit(); return actions.addScene();
     case 's': case 'S': return actions.split();

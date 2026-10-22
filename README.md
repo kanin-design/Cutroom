@@ -147,13 +147,17 @@ editor for every shortcut.
   clip or show that still; scenes without one show a storyboard card with their title, picture and
   sound. The timecode reads hours:minutes:seconds:frames; click it to type a time (2115 is
   00:00:21:15, +12 is twelve frames on). J K L play backwards, stop and play forwards (press again for
-  2×, 4×, 8×); ← → step a frame. ⇧F, or the button under the picture, plays it full screen. For a bigger
+  2×, 4×, 8×). The arrows work like a media player's: stopped, ← → step a frame (⇧ ten), with the picture
+  exactly on that frame; playing, they jump a second (⇧ ten) and play on, and held, the jumps grow. F, or
+  the button under the picture, plays it full screen (F again to leave). For a bigger
   picture without going full screen, hide the side pane (I), or drag the divider above the timeline
   (double-click it for a big monitor and back).
 - **Timeline.**
   - Scenes sit end to end. Drag one to reorder it.
   - Drag a scene's right edge to change its length. With snapping on, the length lands on the beat
     grid, or on cuts and markers. Alt-drag an edge to roll the cut between two scenes instead.
+  - Dragging the playhead, it catches on cuts and markers; hold ⇧ to drag it freely, frame by frame, as near a cut
+    as you like.
   - Pinch or ⌘-scroll to zoom. The ruler counts bars when the board has a tempo, or timecode.
   - Drag the lower edge of a lane's name (Scenes, the soundtrack's waveform, its layers) to make it taller or
     shorter; double-click the edge for automatic again.
@@ -163,6 +167,8 @@ editor for every shortcut.
     bass, drums…), every sound a block at its time, with marks inside it at the height of its notes, so a
     melody shows its shape. Click a sound to hear just it, shift-click to pick more, and write a note on the
     picked sounds: Claude gets exactly which ones (⌥← ⌥→ step to the next sound in a layer; Esc lets go).
+  - **Layers** (beside the waveform) shows or hides the rows. Showing them makes the timeline as tall as they
+    need, as far as the window allows; hiding them puts it back to the height it had.
   - A picked sound opens close up in the side panel: its notes lit on a keyboard, a piano roll of its layer
     around it (click any note to hear it) and its waveform.
   - Double-click a layer to play the film from there with only that layer (double-click its name for the whole
@@ -183,7 +189,7 @@ editor for every shortcut.
   or sent, and back to 0 on every board you open.
 - **Notes to Claude.** Write in the bar under the monitor (press C).
   - It always shows what the note is about: the scene you're in (click to pick another, or the whole
-    board). Turn on **Frame** (F) for the exact frame you're on.
+    board). Turn on **Frame** (⇧F) for the exact frame you're on.
   - **Mark up a frame** (double-click the picture, A, or the markup button): the frame opens large over
     the editor, zoomable. Draw boxes, brush strokes, arrows and points; each mark is numbered and asks
     what it's about. ⇧ squares a box or straightens an arrow, and a selected mark can be reshaped. ← →

@@ -637,7 +637,7 @@ export function renderNow(el = nowEl ?? document.getElementById('nowSounds')) {
     title: `${soundName(e)}\n${(+e.t).toFixed(2)} s${e.dur != null ? ` for ${(+e.dur).toFixed(2)} s` : ''} — click to pick it and hear it; right-click for a note or to mark it for removal`,
     onclick: () => pickSound(e, false),
   }, h('i'), h('b', e.layer), pitchesOf(e).length > 0 && h('em', pitchesOf(e).map(noteName).join(' ')), e.label && h('span', e.label))),
-  list.length > max && h('span.now-more', `+${list.length - max}`));
+  ...(list.length > max ? [h('span.now-more', `+${list.length - max}`)] : [])); // (replaceChildren would write a false)
 }
 
 // Each layer's level at the playhead, from its waveform data, as a bar behind its name.

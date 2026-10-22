@@ -1359,3 +1359,11 @@ body.hud .cinema-hud { opacity: 1; }
 .sync-card .sync-unit { font: 11px var(--mono); color: var(--muted); }
 .sync-card .sync-reset { flex: none !important; padding: 4px 12px !important; }
 .sync-card .sync-hint { margin-top: 9px; font-size: 10.5px; line-height: 1.4; color: var(--faint); }
+
+/* ← → while playing: how far the held arrow has jumped */
+.jump-flash {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 6; pointer-events: none;
+  padding: 8px 16px; border-radius: 999px; background: rgba(0, 0, 0, 0.62); color: #fff;
+  font: 600 18px var(--mono); font-variant-numeric: tabular-nums; opacity: 0; transition: opacity 0.25s;
+}
+.jump-flash.on { opacity: 1; transition: none; }

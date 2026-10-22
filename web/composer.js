@@ -71,7 +71,7 @@ function render() {
   frameBtn.disabled = (!hit && !sound) || onSounds();
   frameBtn.classList.toggle('on', frameOn);
   frameLabel.textContent = sound ? 'At' : 'Frame';
-  frameBtn.title = sound ? 'About this moment of the soundtrack (F)' : 'About this exact frame (F)';
+  frameBtn.title = sound ? 'About this moment of the soundtrack (⇧F)' : 'About this exact frame (⇧F)';
   const f = Math.round(S.t * S.board.fps);
   tcEl.textContent = `${tc(S.t, S.board.fps)} · f${f}`;
   text.placeholder = onRange() ? `Add a note about the passage ${rangeWords()}…` : onSounds()

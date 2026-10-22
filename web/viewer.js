@@ -243,10 +243,16 @@ function syncVideo(v, local, r) {
       v.playbackRate = Math.abs(drift) < 0.012 * rate ? rate : clamp(rate - drift * 2.5, rate * 0.8, rate * 1.2);
     }
   } else {
-    // Paused, or shuttling backwards (video can't play in reverse): show the frame at the clock.
+    // Paused, or shuttling backwards (video can't play in reverse): show the frame at the clock. Asked for the
+    // middle of the frame, not its start: at a frame's exact start the browser often shows the frame before it
+    // (every third step of a 60 fps clip), so stepping repeated one frame, skipped the next, and a seek again at
+    // the same time could flip between the two.
+    const fps = S.board.fps;
+    const mid = d ? Math.min((Math.round(local * fps) + 0.5) / fps, d - 0.5 / fps) : local;
+    v.wantTime = mid;
     v.playbackRate = 1;
     if (!v.paused) v.pause();
-    if (!v.seeking && Math.abs(v.currentTime - target) > 0.25 / S.board.fps) v.currentTime = target;
+    if (!v.seeking && Math.abs(v.currentTime - mid) > 0.25 / fps) v.currentTime = mid;
   }
 }
 
